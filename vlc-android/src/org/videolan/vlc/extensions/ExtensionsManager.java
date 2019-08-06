@@ -11,14 +11,14 @@ import android.content.pm.ResolveInfo;
 import android.content.res.Resources;
 import android.graphics.drawable.Drawable;
 import android.os.Bundle;
-import android.preference.PreferenceManager;
-import android.support.design.widget.NavigationView;
-import android.support.v7.app.AlertDialog;
+import com.google.android.material.navigation.NavigationView;
+import androidx.appcompat.app.AlertDialog;
 import android.text.TextUtils;
 import android.view.MenuItem;
 
 import org.videolan.vlc.R;
 import org.videolan.vlc.gui.MainActivity;
+import org.videolan.vlc.util.Settings;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -79,21 +79,21 @@ public class ExtensionsManager {
             }
         }
 
-        SharedPreferences settings = PreferenceManager.getDefaultSharedPreferences(context);
+        SharedPreferences settings = Settings.INSTANCE.getInstance(context);
         deleteUnusedExtensionPreferences(extensions, settings);
 
-        if (context instanceof MainActivity && ((MainActivity)context).getNavigator().currentIdIsExtension()) {
+        if (context instanceof MainActivity && ((MainActivity)context).currentIdIsExtension()) {
             if (previousExtensionIsEnabled(context)) {
                 String lastExtensionTitle = settings.getString("current_extension_name", null);
                 for (int i = 0; i < extensions.size(); ++i) {
                     if (TextUtils.equals(extensions.get(i).title(), lastExtensionTitle)) {
-                        ((MainActivity)context).getNavigator().setCurrentFragmentId(i);
+                        ((MainActivity)context).setCurrentFragmentId(i);
                         settings.edit().putInt("fragment_id", i).apply();
                         break;
                     }
                 }
             } else {
-                ((MainActivity)context).getNavigator().setCurrentFragmentId(-1);
+                ((MainActivity)context).setCurrentFragmentId(-1);
                 settings.edit().putInt("fragment_id", -1).apply();
             }
         }
@@ -113,7 +113,7 @@ public class ExtensionsManager {
     }
 
     public boolean previousExtensionIsEnabled(Context context) {
-        SharedPreferences settings = PreferenceManager.getDefaultSharedPreferences(context);
+        SharedPreferences settings = Settings.INSTANCE.getInstance(context);
         String key = EXTENSION_PREFIX + "_" + settings.getString("current_extension_name", null);
         return settings.contains(key) && settings.getBoolean(key, false);
     }
@@ -183,9 +183,9 @@ public class ExtensionsManager {
                 .setPositiveButton(R.string.yes, new DialogInterface.OnClickListener() {
                     @Override
                     public void onClick(DialogInterface dialogInterface, int which) {
-                        PreferenceManager.getDefaultSharedPreferences(activity.getApplication()).edit().putBoolean(key, true).apply();
+                        Settings.INSTANCE.getInstance(activity.getApplication()).edit().putBoolean(key, true).apply();
                         for (int i=0; i<extraTitles.size(); i++)
-                            PreferenceManager.getDefaultSharedPreferences(activity.getApplication()).edit().putBoolean(extraKeys.get(i), extraCheckedStates[i]).apply();
+                            Settings.INSTANCE.getInstance(activity.getApplication()).edit().putBoolean(extraKeys.get(i), extraCheckedStates[i]).apply();
                         displayPlugin(activity, id, extension, true);
                         activity.findViewById(R.id.navigation).postInvalidate();
                     }
@@ -199,9 +199,9 @@ public class ExtensionsManager {
                 .setOnCancelListener(new DialogInterface.OnCancelListener() {
                     @Override
                     public void onCancel(DialogInterface dialogInterface) {
-                        PreferenceManager.getDefaultSharedPreferences(activity.getApplication()).edit().putBoolean(key, false).apply();
+                        Settings.INSTANCE.getInstance(activity.getApplication()).edit().putBoolean(key, false).apply();
                         for (int i=0; i<extraTitles.size(); i++)
-                            PreferenceManager.getDefaultSharedPreferences(activity.getApplication()).edit().putBoolean(extraKeys.get(i), false).apply();
+                            Settings.INSTANCE.getInstance(activity.getApplication()).edit().putBoolean(extraKeys.get(i), false).apply();
                     }
                 })
                 .show();

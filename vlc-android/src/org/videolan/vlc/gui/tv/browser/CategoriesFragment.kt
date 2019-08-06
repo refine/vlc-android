@@ -25,26 +25,34 @@ package org.videolan.vlc.gui.tv.browser
 
 import android.content.SharedPreferences
 import android.os.Bundle
-import android.preference.PreferenceManager
-import android.support.v17.leanback.app.BackgroundManager
-import android.support.v17.leanback.app.BrowseSupportFragment
-import android.support.v17.leanback.widget.*
-import android.support.v4.content.ContextCompat
 import android.view.View
 import android.widget.ImageView
+import androidx.core.content.ContextCompat
+import androidx.leanback.app.BackgroundManager
+import androidx.leanback.app.BrowseSupportFragment
+import androidx.leanback.widget.*
+import androidx.lifecycle.Observer
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.MainScope
+import kotlinx.coroutines.cancel
+import org.videolan.medialibrary.interfaces.media.AbstractMediaWrapper
 import org.videolan.medialibrary.media.MediaLibraryItem
-import org.videolan.medialibrary.media.MediaWrapper
 import org.videolan.vlc.R
 import org.videolan.vlc.gui.tv.CardPresenter
 import org.videolan.vlc.gui.tv.TvUtil
 import org.videolan.vlc.gui.tv.browser.interfaces.BrowserFragmentInterface
+import org.videolan.vlc.gui.tv.updateBackground
 import org.videolan.vlc.interfaces.Sortable
-import org.videolan.vlc.util.Constants
+import org.videolan.vlc.util.HEADER_DIRECTORIES
+import org.videolan.vlc.util.HEADER_NETWORK
+import org.videolan.vlc.util.Settings
 import org.videolan.vlc.viewmodels.BaseModel
 
 private const val TAG = "VLC/CategoriesFragment"
 
-open class CategoriesFragment<T : BaseModel<out MediaLibraryItem>> : BrowseSupportFragment(), Sortable, OnItemViewSelectedListener, OnItemViewClickedListener, BrowserFragmentInterface {
+open class CategoriesFragment<T : BaseModel<out MediaLibraryItem>> : BrowseSupportFragment(),
+        Sortable, OnItemViewSelectedListener, OnItemViewClickedListener,
+        BrowserFragmentInterface, CoroutineScope by MainScope() {
 
     private lateinit var selecteditem: MediaLibraryItem
     private lateinit var backgroundManager: BackgroundManager
@@ -52,14 +60,14 @@ open class CategoriesFragment<T : BaseModel<out MediaLibraryItem>> : BrowseSuppo
     private lateinit var categoryRows: Map<String, ListRow>
     lateinit var viewModel: T
     private var restart = false
-    protected val preferences: SharedPreferences by lazy { PreferenceManager.getDefaultSharedPreferences(requireContext()) }
+    protected val preferences: SharedPreferences by lazy { Settings.getInstance(requireContext()) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // UI setting
         headersState = BrowseSupportFragment.HEADERS_DISABLED
         brandColor = ContextCompat.getColor(activity!!, R.color.orange800)
-        if (savedInstanceState == null) backgroundManager = BackgroundManager.getInstance(requireActivity())
+        if (!this::backgroundManager.isInitialized) backgroundManager = BackgroundManager.getInstance(requireActivity())
         setOnSearchClickedListener { sort(requireActivity().findViewById(R.id.title_orb)) }
     }
 
@@ -71,25 +79,34 @@ open class CategoriesFragment<T : BaseModel<out MediaLibraryItem>> : BrowseSuppo
         backgroundManager.attachToView(view)
         searchAffordanceColor = ContextCompat.getColor(requireContext(), R.color.orange500)
         requireActivity().findViewById<ImageView>(R.id.icon).setImageResource(R.drawable.ic_menu_sort)
+        if (this::viewModel.isInitialized) viewModel.loading.observe(this, Observer { (activity as? VerticalGridActivity)?.showProgress(it) })
     }
 
     override fun onStart() {
         super.onStart()
-        if (this::selecteditem.isInitialized) TvUtil.updateBackground(backgroundManager, selecteditem)
+        if (this::selecteditem.isInitialized) updateBackground(requireContext(), backgroundManager, selecteditem)
         if (restart) refresh()
         restart = true
     }
 
+    override fun onDestroy() {
+        cancel()
+        super.onDestroy()
+    }
+
+    private var currentArt : String? = null
     override fun onItemSelected(itemViewHolder: Presenter.ViewHolder?, item: Any?, rowViewHolder: RowPresenter.ViewHolder?, row: Row?) {
         if (item === null) return
-        selecteditem = item as MediaWrapper
-        TvUtil.updateBackground(backgroundManager, item)
+        selecteditem = item as AbstractMediaWrapper
+        if (currentArt == item.artworkMrl) return
+        currentArt = item.artworkMrl
+        updateBackground(requireContext(), backgroundManager, item)
     }
 
     override fun onItemClicked(viewHolder: Presenter.ViewHolder, item: Any, viewHolder1: RowPresenter.ViewHolder, row: Row) {
-        val media = item as MediaWrapper
-        if (media.type == MediaWrapper.TYPE_DIR) TvUtil.browseFolder(requireActivity(), getCategoryId(), item.uri)
-        else TvUtil.openMedia(requireActivity(), item, null)
+        val media = item as AbstractMediaWrapper
+        if (media.type == AbstractMediaWrapper.TYPE_DIR) TvUtil.browseFolder(requireActivity(), getCategoryId(), item.uri)
+        else TvUtil.openMedia(requireActivity(), item, viewModel)
     }
 
     override fun refresh() {
@@ -97,13 +114,17 @@ open class CategoriesFragment<T : BaseModel<out MediaLibraryItem>> : BrowseSuppo
     }
 
     protected fun update(map: Map<String, List<MediaLibraryItem>>?) {
-        if (map === null) return
+        if (map.isNullOrEmpty()) {
+            (activity as? VerticalGridActivity)?.run { updateEmptyView(true) }
+            return
+        }
         val rows = mutableMapOf<String, ListRow>()
         for ((key, list) in map) {
             val row = getCategoryRow(key)
             (row.adapter as ArrayObjectAdapter).setItems(list, TvUtil.diffCallback)
             rows[key] = row
         }
+        (activity as? VerticalGridActivity)?.run { updateEmptyView(false) }
         //TODO  Activate animations once IndexOutOfRange Exception is fixed
         rowsAdapter.setItems(rows.values.toList(), null /*TvUtil.listDiffCallback*/)
         categoryRows = rows
@@ -111,12 +132,13 @@ open class CategoriesFragment<T : BaseModel<out MediaLibraryItem>> : BrowseSuppo
 
     private fun getCategoryRow(key: String): ListRow {
         val fromCache = if (this::categoryRows.isInitialized) categoryRows[key] else null
-        return fromCache ?: ListRow(HeaderItem(0, key), ArrayObjectAdapter(CardPresenter(activity)))
+        return fromCache
+                ?: ListRow(HeaderItem(0, key), ArrayObjectAdapter(CardPresenter(requireActivity())))
     }
 
     private fun getCategoryId() = when(this) {
-        is NetworkBrowserFragment ->  Constants.HEADER_NETWORK
-        is DirectoryBrowserFragment -> Constants.HEADER_DIRECTORIES
+        is NetworkBrowserFragment ->  HEADER_NETWORK
+        is DirectoryBrowserFragment -> HEADER_DIRECTORIES
         else -> -1
     }
 

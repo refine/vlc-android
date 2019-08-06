@@ -20,13 +20,15 @@
 
 package org.videolan.vlc.providers
 
+import android.content.Context
+import org.videolan.libvlc.Media
 import org.videolan.libvlc.util.MediaBrowser
+import org.videolan.medialibrary.MLServiceLocator
+import org.videolan.medialibrary.interfaces.media.AbstractMediaWrapper
 import org.videolan.medialibrary.media.MediaLibraryItem
-import org.videolan.medialibrary.media.MediaWrapper
 import org.videolan.vlc.util.LiveDataset
 
-
-class FilePickerProvider(dataset: LiveDataset<MediaLibraryItem>, url: String?) : FileBrowserProvider(dataset, url, true, false) {
+class FilePickerProvider(context: Context, dataset: LiveDataset<MediaLibraryItem>, url: String?, showDummyCategory: Boolean = false) : FileBrowserProvider(context, dataset, url, true, false, showDummyCategory) {
 
     override fun getFlags(): Int {
         return MediaBrowser.Flag.Interact or MediaBrowser.Flag.NoSlavesAutodetect
@@ -34,10 +36,14 @@ class FilePickerProvider(dataset: LiveDataset<MediaLibraryItem>, url: String?) :
 
     override fun initBrowser() {
         super.initBrowser()
-        mediabrowser.setIgnoreFileTypes("db,nfo,ini,jpg,jpeg,ljpg,gif,png,pgm,pgmyuv,pbm,pam,tga,bmp,pnm,xpm,xcf,pcx,tif,tiff,lbm,sfv")
+        mediabrowser?.setIgnoreFileTypes("db,nfo,ini,jpg,jpeg,ljpg,gif,png,pgm,pgmyuv,pbm,pam,tga,bmp,pnm,xpm,xcf,pcx,tif,tiff,lbm,sfv")
     }
 
-    override fun addMedia(media: MediaLibraryItem) {
-        if (media is MediaWrapper && media.type == MediaWrapper.TYPE_SUBTITLE) super.addMedia(media)
+    override suspend fun findMedia(media: Media) = MLServiceLocator.getAbstractMediaWrapper(media)?.takeIf { mw ->
+        mw.type == AbstractMediaWrapper.TYPE_DIR || mw.type == AbstractMediaWrapper.TYPE_SUBTITLE
     }
+
+    override fun computeHeaders(value: MutableList<MediaLibraryItem>) {}
+
+    override fun parseSubDirectories(list : List<MediaLibraryItem>?) {}
 }

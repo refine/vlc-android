@@ -22,22 +22,13 @@ package org.videolan.vlc.gui.audio
 
 import android.Manifest
 import android.annotation.TargetApi
-import android.arch.lifecycle.Observer
 import android.content.Context
 import android.content.SharedPreferences
+import android.content.res.Configuration
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
-import android.preference.PreferenceManager
-import android.support.annotation.MainThread
-import android.support.annotation.RequiresPermission
-import android.support.design.widget.BottomSheetBehavior
-import android.support.design.widget.Snackbar
-import android.support.v4.app.Fragment
-import android.support.v7.widget.LinearLayoutManager
-import android.support.v7.widget.PopupMenu
-import android.support.v7.widget.helper.ItemTouchHelper
 import android.text.Editable
 import android.text.TextUtils
 import android.text.TextWatcher
@@ -48,59 +39,71 @@ import android.view.ViewGroup
 import android.view.inputmethod.InputMethodManager
 import android.widget.SeekBar
 import android.widget.SeekBar.OnSeekBarChangeListener
-import kotlinx.coroutines.experimental.CoroutineStart
-import kotlinx.coroutines.experimental.android.UI
-import kotlinx.coroutines.experimental.channels.Channel
-import kotlinx.coroutines.experimental.channels.actor
-import kotlinx.coroutines.experimental.launch
-import kotlinx.coroutines.experimental.withContext
-import org.videolan.libvlc.util.AndroidUtil
+import androidx.annotation.MainThread
+import androidx.annotation.RequiresPermission
+import androidx.appcompat.app.AppCompatActivity
+import androidx.constraintlayout.widget.ConstraintSet
+import androidx.fragment.app.Fragment
+import androidx.lifecycle.Observer
+import androidx.recyclerview.widget.ItemTouchHelper
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.transition.AutoTransition
+import androidx.transition.TransitionManager
+import androidx.vectordrawable.graphics.drawable.AnimatedVectorDrawableCompat
+import com.google.android.material.bottomsheet.BottomSheetBehavior
+import com.google.android.material.snackbar.Snackbar
+import kotlinx.coroutines.*
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.channels.actor
 import org.videolan.medialibrary.Tools
-import org.videolan.medialibrary.media.MediaWrapper
+import org.videolan.medialibrary.interfaces.media.AbstractMediaWrapper
+import org.videolan.tools.isStarted
 import org.videolan.vlc.PlaybackService
 import org.videolan.vlc.R
 import org.videolan.vlc.VLCApplication
 import org.videolan.vlc.databinding.AudioPlayerBinding
 import org.videolan.vlc.gui.AudioPlayerContainerActivity
-import org.videolan.vlc.gui.PlaybackServiceActivity
-import org.videolan.vlc.gui.dialogs.AdvOptionsDialog
-import org.videolan.vlc.gui.helpers.AudioUtil
-import org.videolan.vlc.gui.helpers.SwipeDragItemTouchHelperCallback
-import org.videolan.vlc.gui.helpers.UiTools
-import org.videolan.vlc.gui.preferences.PreferencesActivity
+import org.videolan.vlc.gui.dialogs.CtxActionReceiver
+import org.videolan.vlc.gui.dialogs.showContext
+import org.videolan.vlc.gui.helpers.*
 import org.videolan.vlc.gui.video.VideoPlayerActivity
 import org.videolan.vlc.gui.view.AudioMediaSwitcher.AudioMediaSwitcherListener
-import org.videolan.vlc.util.AndroidDevices
-import org.videolan.vlc.util.Constants
-import org.videolan.vlc.util.VLCIO
+import org.videolan.vlc.media.PlaylistManager.Companion.hasMedia
+import org.videolan.vlc.util.*
 import org.videolan.vlc.viewmodels.PlaybackProgress
 import org.videolan.vlc.viewmodels.PlaylistModel
 
 private const val TAG = "VLC/AudioPlayer"
-private const val SEARCH_TIMEOUT_MILLIS = 5000
+private const val SEARCH_TIMEOUT_MILLIS = 10000L
 
+@ObsoleteCoroutinesApi
+@ExperimentalCoroutinesApi
 @Suppress("UNUSED_PARAMETER")
-class AudioPlayer : Fragment(), PlaylistAdapter.IPlayer, TextWatcher, PlaybackService.Client.Callback {
+class AudioPlayer : Fragment(), PlaylistAdapter.IPlayer, TextWatcher, CoroutineScope by MainScope() {
 
     private lateinit var binding: AudioPlayerBinding
     private lateinit var playlistAdapter: PlaylistAdapter
     private lateinit var settings: SharedPreferences
     private val handler by lazy(LazyThreadSafetyMode.NONE) { Handler() }
-    private val updateActor = actor<Unit>(UI, capacity = Channel.CONFLATED) { for (entry in channel) doUpdate() }
-    private lateinit var helper: PlaybackServiceActivity.Helper
-    private var service: PlaybackService? = null
+    private val updateActor = actor<Unit>(capacity = Channel.CONFLATED) { for (entry in channel) doUpdate() }
     private lateinit var playlistModel: PlaylistModel
+    private lateinit var optionsDelegate: PlayerOptionsDelegate
 
     private var showRemainingTime = false
     private var previewingSeek = false
     private var advFuncVisible = false
     private var playlistSwitchVisible = false
     private var searchVisible = false
+    private var searchTextVisible = false
     private var headerPlayPauseVisible = false
     private var progressBarVisible = false
     private var headerTimeVisible = false
     private var playerState = 0
     private var currentCoverArt: String? = null
+    private lateinit var pauseToPlay: AnimatedVectorDrawableCompat
+    private lateinit var playToPause: AnimatedVectorDrawableCompat
+    private lateinit var pauseToPlaySmall: AnimatedVectorDrawableCompat
+    private lateinit var playToPauseSmall: AnimatedVectorDrawableCompat
 
     companion object {
         private var DEFAULT_BACKGROUND_DARKER_ID = 0
@@ -109,10 +112,16 @@ class AudioPlayer : Fragment(), PlaylistAdapter.IPlayer, TextWatcher, PlaybackSe
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        savedInstanceState?.let { playerState = it.getInt("player_state")}
+        savedInstanceState?.let {
+            playerState = it.getInt("player_state")
+            wasPlaying = it.getBoolean("was_playing")
+        }
         playlistAdapter = PlaylistAdapter(this)
-        settings = PreferenceManager.getDefaultSharedPreferences(activity)
-        helper = PlaybackServiceActivity.Helper(activity, this)
+        settings = Settings.getInstance(requireContext())
+        playlistModel = PlaylistModel.get(this)
+        playlistModel.progress.observe(this@AudioPlayer, Observer { it?.let { updateProgress(it) } })
+        playlistModel.dataset.observe(this@AudioPlayer, playlistObserver)
+        playlistAdapter.setModel(playlistModel)
     }
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View? {
@@ -122,17 +131,15 @@ class AudioPlayer : Fragment(), PlaylistAdapter.IPlayer, TextWatcher, PlaybackSe
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
-        if (AndroidUtil.isJellyBeanMR1OrLater) {
-            DEFAULT_BACKGROUND_DARKER_ID = UiTools.getResourceFromAttribute(view.context, R.attr.background_default_darker)
-            DEFAULT_BACKGROUND_ID = UiTools.getResourceFromAttribute(view.context, R.attr.background_default)
-        }
+        DEFAULT_BACKGROUND_DARKER_ID = UiTools.getResourceFromAttribute(view.context, R.attr.background_default_darker)
+        DEFAULT_BACKGROUND_ID = UiTools.getResourceFromAttribute(view.context, R.attr.background_default)
         binding.songsList.layoutManager = LinearLayoutManager(view.context)
         binding.songsList.adapter = playlistAdapter
         binding.audioMediaSwitcher.setAudioMediaSwitcherListener(headerMediaSwitcherListener)
         binding.coverMediaSwitcher.setAudioMediaSwitcherListener(mCoverMediaSwitcherListener)
         binding.playlistSearchText.editText?.addTextChangedListener(this)
 
-        val callback = SwipeDragItemTouchHelperCallback(playlistAdapter)
+        val callback = SwipeDragItemTouchHelperCallback(playlistAdapter, true)
         val touchHelper = ItemTouchHelper(callback)
         touchHelper.attachToRecyclerView(binding.songsList)
 
@@ -150,108 +157,114 @@ class AudioPlayer : Fragment(), PlaylistAdapter.IPlayer, TextWatcher, PlaybackSe
         userVisibleHint = true
         binding.showCover = settings.getBoolean("audio_player_show_cover", false)
         binding.playlistSwitch.setImageResource(UiTools.getResourceFromAttribute(view.context, if (binding.showCover) R.attr.ic_playlist else R.attr.ic_playlist_on))
+        binding.timeline.setOnSeekBarChangeListener(timelineListener)
+
+        //For resizing purpose, we have to cache this twice even if it's from the same resource
+        playToPause = AnimatedVectorDrawableCompat.create(requireActivity(), R.drawable.anim_play_pause)!!
+        pauseToPlay = AnimatedVectorDrawableCompat.create(requireActivity(), R.drawable.anim_pause_play)!!
+        playToPauseSmall = AnimatedVectorDrawableCompat.create(requireActivity(), R.drawable.anim_play_pause)!!
+        pauseToPlaySmall = AnimatedVectorDrawableCompat.create(requireActivity(), R.drawable.anim_pause_play)!!
     }
 
-    override fun onStart() {
-        super.onStart()
-        helper.onStart()
-    }
-
-    override fun onStop() {
-        super.onStop()
-        helper.onStop()
+    override fun onResume() {
+        onStateChanged(playerState)
+        super.onResume()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         outState.putInt("player_state", playerState)
+        outState.putBoolean("was_playing", wasPlaying)
     }
 
-    override fun onPopupMenu(anchor: View, position: Int, media: MediaWrapper) {
+    private val ctxReceiver: CtxActionReceiver = object : CtxActionReceiver {
+        override fun onCtxAction(position: Int, option: Int) {
+            when (option) {
+                CTX_SET_RINGTONE -> AudioUtil.setRingtone(playlistAdapter.getItem(position), requireActivity())
+                CTX_ADD_TO_PLAYLIST -> {
+                    val mw = playlistAdapter.getItem(position)
+                    UiTools.addToPlaylist(requireActivity(), listOf(mw))
+                }
+                CTX_REMOVE_FROM_PLAYLIST -> view?.let {
+                    val mw = playlistAdapter.getItem(position)
+                    val cancelAction = Runnable { playlistModel.insertMedia(position, mw) }
+                    val message = String.format(getString(R.string.remove_playlist_item), mw.title)
+                    UiTools.snackerWithCancel(it, message, null, cancelAction)
+                    playlistModel.remove(position)
+                }
+                CTX_STOP_AFTER_THIS -> playlistModel.stopAfter(position)
+            }
+        }
+    }
+
+    override fun onPopupMenu(view: View, position: Int, item: AbstractMediaWrapper?) {
         val activity = activity
         if (activity === null || position >= playlistAdapter.itemCount) return
-        val pos = playlistModel.getItemPosition(position, media)
-        if (pos == -1) return
-        val mw = playlistAdapter.getItem(pos)
-        val popupMenu = PopupMenu(activity, anchor)
-        popupMenu.menuInflater.inflate(R.menu.audio_player, popupMenu.menu)
-
-        popupMenu.menu.setGroupVisible(R.id.phone_only, mw!!.type != MediaWrapper.TYPE_VIDEO
-                && TextUtils.equals(mw.uri.scheme, "file")
-                && AndroidDevices.isPhone)
-
-        popupMenu.setOnMenuItemClickListener(PopupMenu.OnMenuItemClickListener { item ->
-            if (item.itemId == R.id.audio_player_mini_remove) {
-                service?.apply {
-                    remove(pos)
-                    return@OnMenuItemClickListener true
-                }
-            } else if (item.itemId == R.id.audio_player_set_song) {
-                AudioUtil.setRingtone(mw, activity)
-                return@OnMenuItemClickListener true
-            }
-            false
-        })
-        popupMenu.show()
+        val flags = CTX_REMOVE_FROM_PLAYLIST or CTX_SET_RINGTONE or CTX_ADD_TO_PLAYLIST or CTX_STOP_AFTER_THIS
+        showContext(activity, ctxReceiver, position, item?.title ?: "", flags)
     }
 
     private fun doUpdate() {
-        if (activity === null) return
-        service?.apply {
-            if (hasMedia() && !isVideoPlaying && isVisible
-                    && settings.getBoolean(PreferencesActivity.VIDEO_RESTORE, false)) {
-                settings.edit().putBoolean(PreferencesActivity.VIDEO_RESTORE, false).apply()
-                currentMediaWrapper?.removeFlags(MediaWrapper.MEDIA_FORCE_AUDIO)
-                switchToVideo()
-                return
-            }
-        }
-
-        binding.audioMediaSwitcher.updateMedia(service)
-        binding.coverMediaSwitcher.updateMedia(service)
-
-        binding.playlistPlayasaudioOff.visibility = if (service?.videoTracksCount ?: 0 > 0) View.VISIBLE else View.GONE
+        if (activity === null || (isVisible && playlistModel.switchToVideo())) return
+        binding.playlistPlayasaudioOff.visibility = if (playlistModel.videoTrackCount > 0) View.VISIBLE else View.GONE
+        binding.audioMediaSwitcher.updateMedia(this, playlistModel.service)
+        binding.coverMediaSwitcher.updateMedia(this, playlistModel.service)
 
         updatePlayPause()
         updateShuffleMode()
         updateRepeatMode()
-        binding.timeline.setOnSeekBarChangeListener(timelineListener)
         updateBackground()
     }
 
+    private var wasPlaying = true
     private fun updatePlayPause() {
-        val playing = service?.isPlaying ?: false
-        val imageResId = UiTools.getResourceFromAttribute(activity, if (playing) R.attr.ic_pause else R.attr.ic_play)
+        val playing = playlistModel.playing
         val text = getString(if (playing) R.string.pause else R.string.play)
-        binding.playPause.setImageResource(imageResId)
-        binding.playPause.contentDescription = text
-        binding.headerPlayPause.setImageResource(imageResId)
-        binding.headerPlayPause.contentDescription = text
-    }
 
-    private fun updateShuffleMode() {
-        service?.let {
-            binding.shuffle.setImageResource(UiTools.getResourceFromAttribute(activity, if (it.isShuffling) R.attr.ic_shuffle_on else R.attr.ic_shuffle))
-            binding.shuffle.contentDescription = resources.getString(if (it.isShuffling) R.string.shuffle_on else R.string.shuffle)
-            binding.shuffle.visibility = if (it.canShuffle()) View.VISIBLE else View.INVISIBLE
+        val drawable = if (playing) playToPause else pauseToPlay
+        val drawableSmall = if (playing) playToPauseSmall else pauseToPlaySmall
+        binding.playPause.setImageDrawable(drawable)
+        binding.headerPlayPause.setImageDrawable(drawableSmall)
+        if (playing != wasPlaying) {
+            drawable.start()
+            drawableSmall.start()
         }
+
+        playlistAdapter.setCurrentlyPlaying(playing)
+        binding.playPause.contentDescription = text
+        binding.headerPlayPause.contentDescription = text
+        wasPlaying = playing
     }
 
+    private var wasShuffling = false
+    private fun updateShuffleMode() {
+        binding.shuffle.visibility = if (playlistModel.canShuffle) View.VISIBLE else View.INVISIBLE
+        val shuffling = playlistModel.shuffling
+        if (wasShuffling == shuffling) return
+        binding.shuffle.setImageResource(if (shuffling) R.drawable.ic_shuffle_on else R.drawable.ic_shuffle)
+        binding.shuffle.contentDescription = resources.getString(if (shuffling) R.string.shuffle_on else R.string.shuffle)
+        wasShuffling = shuffling
+    }
+
+    private var previousRepeatType = -1
     private fun updateRepeatMode() {
-        when (service?.repeatType) {
-            Constants.REPEAT_ONE -> {
-                binding.repeat.setImageResource(UiTools.getResourceFromAttribute(activity, R.attr.ic_repeat_one))
+        val repeatType = playlistModel.repeatType
+        if (previousRepeatType == repeatType) return
+        when (repeatType) {
+            REPEAT_ONE -> {
+                binding.repeat.setImageResource(R.drawable.ic_repeat_one)
                 binding.repeat.contentDescription = resources.getString(R.string.repeat_single)
             }
-            Constants.REPEAT_ALL -> {
-                binding.repeat.setImageResource(UiTools.getResourceFromAttribute(activity, R.attr.ic_repeat_all))
+            REPEAT_ALL -> {
+                binding.repeat.setImageResource(R.drawable.ic_repeat_all)
                 binding.repeat.contentDescription = resources.getString(R.string.repeat_all)
             }
             else -> {
-                binding.repeat.setImageResource(UiTools.getResourceFromAttribute(activity, R.attr.ic_repeat))
+                binding.repeat.setImageResource(R.drawable.ic_repeat)
                 binding.repeat.contentDescription = resources.getString(R.string.repeat)
             }
         }
+        previousRepeatType = repeatType
     }
 
     private fun updateProgress(progress: PlaybackProgress) {
@@ -270,29 +283,29 @@ class AudioPlayer : Fragment(), PlaylistAdapter.IPlayer, TextWatcher, PlaybackSe
 
     @TargetApi(Build.VERSION_CODES.JELLY_BEAN_MR1)
     private fun updateBackground() {
-        if (AndroidUtil.isJellyBeanMR1OrLater && settings.getBoolean("blurred_cover_background", true)) {
-            launch(UI, CoroutineStart.UNDISPATCHED) {
-                val mw = service?.currentMediaWrapper
-                if (mw === null || TextUtils.equals(currentCoverArt, mw.artworkMrl)) return@launch
+        if (settings.getBoolean("blurred_cover_background", true)) {
+            launch {
+                val mw = playlistModel.currentMediaWrapper
+                if (!isStarted() || mw === null || TextUtils.equals(currentCoverArt, mw.artworkMrl)) return@launch
                 currentCoverArt = mw.artworkMrl
                 if (TextUtils.isEmpty(mw.artworkMrl)) {
                     setDefaultBackground()
                 } else {
-                    val blurredCover = withContext(VLCIO) { UiTools.blurBitmap(AudioUtil.readCoverBitmap(Uri.decode(mw.artworkMrl), binding.contentLayout.width)) }
+                    val width = if (binding.contentLayout.width > 0) binding.contentLayout.width else activity?.getScreenWidth()
+                            ?: return@launch
+                    val blurredCover = withContext(Dispatchers.IO) { UiTools.blurBitmap(AudioUtil.readCoverBitmap(Uri.decode(mw.artworkMrl), width)) }
+                    if (!isStarted()) return@launch
                     if (blurredCover !== null) {
-                        val activity = activity as? AudioPlayerContainerActivity
-                        if (activity === null) return@launch
+                        val activity = activity as? AudioPlayerContainerActivity ?: return@launch
                         binding.backgroundView.setColorFilter(UiTools.getColorFromAttribute(activity, R.attr.audio_player_background_tint))
                         binding.backgroundView.setImageBitmap(blurredCover)
                         binding.backgroundView.visibility = View.VISIBLE
                         binding.songsList.setBackgroundResource(0)
-                        if (playerState == BottomSheetBehavior.STATE_EXPANDED) binding.header.setBackgroundResource(0)
+                        binding.header.setBackgroundColor(UiTools.getColorFromAttribute(requireContext(), R.attr.audio_player_transparent))
                     } else setDefaultBackground()
                 }
             }
         }
-        if ((activity as AudioPlayerContainerActivity).isAudioPlayerExpanded)
-            setHeaderVisibilities(true, true, false, false, false, true)
     }
 
     @MainThread
@@ -303,13 +316,14 @@ class AudioPlayer : Fragment(), PlaylistAdapter.IPlayer, TextWatcher, PlaybackSe
     }
 
     override fun onSelectionSet(position: Int) {
-        if (playerState != BottomSheetBehavior.STATE_COLLAPSED && playerState != BottomSheetBehavior.STATE_HIDDEN) {
+        if (playerState != BottomSheetBehavior.STATE_COLLAPSED && playerState != com.google.android.material.bottomsheet.BottomSheetBehavior.STATE_HIDDEN) {
             binding.songsList.scrollToPosition(position)
         }
     }
 
-    override fun playItem(position: Int, item: MediaWrapper) {
-         service?.playIndex(playlistModel.getItemPosition(position, item))
+    override fun playItem(position: Int, item: AbstractMediaWrapper) {
+        clearSearch()
+        playlistModel.play(playlistModel.getPlaylistPosition(position, item))
     }
 
     fun onTimeLabelClick(view: View) {
@@ -318,34 +332,27 @@ class AudioPlayer : Fragment(), PlaylistAdapter.IPlayer, TextWatcher, PlaybackSe
     }
 
     fun onPlayPauseClick(view: View) {
-        service?.run { if (isPlaying) pause() else play() }
+        playlistModel.togglePlayPause()
     }
 
     fun onStopClick(view: View): Boolean {
-        service?.stop()
+        playlistModel.stop()
         return true
     }
 
     fun onNextClick(view: View) {
-        service?.run {
-            if (hasNext()) next()
-            else Snackbar.make(binding.root, R.string.lastsong, Snackbar.LENGTH_SHORT).show()
-        }
+        if (!playlistModel.next()) Snackbar.make(binding.root, R.string.lastsong, com.google.android.material.snackbar.Snackbar.LENGTH_SHORT).show()
     }
 
     fun onPreviousClick(view: View) {
-        service?.run {
-            if (hasPrevious() || isSeekable) previous(false)
-            else Snackbar.make(binding.root, R.string.firstsong, Snackbar.LENGTH_SHORT).show()
-        }
+        if (!playlistModel.previous()) Snackbar.make(binding.root, R.string.firstsong, com.google.android.material.snackbar.Snackbar.LENGTH_SHORT).show()
     }
 
     fun onRepeatClick(view: View) {
-        if (service === null) return
-        when (service?.repeatType) {
-            Constants.REPEAT_NONE -> service?.repeatType = Constants.REPEAT_ALL
-            Constants.REPEAT_ALL -> service?.repeatType = Constants.REPEAT_ONE
-            else -> service?.repeatType = Constants.REPEAT_NONE
+        when (playlistModel.repeatType) {
+            REPEAT_NONE -> playlistModel.repeatType = REPEAT_ALL
+            REPEAT_ALL -> playlistModel.repeatType = REPEAT_ONE
+            else -> playlistModel.repeatType = REPEAT_NONE
         }
         updateRepeatMode()
     }
@@ -357,77 +364,86 @@ class AudioPlayer : Fragment(), PlaylistAdapter.IPlayer, TextWatcher, PlaybackSe
     }
 
     fun onShuffleClick(view: View) {
-        service?.apply {
-            shuffle()
-            updateShuffleMode()
-        }
+        playlistModel.shuffle()
+        updateShuffleMode()
     }
 
     fun onResumeToVideoClick(v: View) {
-        service?.apply {
-            currentMediaWrapper?.let {
-                if (hasRenderer()) VideoPlayerActivity.startOpened(VLCApplication.getAppContext(),
-                        it.uri, currentMediaPosition)
-                else if (hasMedia()) {
-                    it.removeFlags(MediaWrapper.MEDIA_FORCE_AUDIO)
-                    switchToVideo()
-                }
+        playlistModel.currentMediaWrapper?.let {
+            if (PlaybackService.hasRenderer()) VideoPlayerActivity.startOpened(v.context,
+                    it.uri, playlistModel.currentMediaPosition)
+            else if (hasMedia()) {
+                it.removeFlags(AbstractMediaWrapper.MEDIA_FORCE_AUDIO)
+                playlistModel.switchToVideo()
             }
         }
     }
 
-
     fun showAdvancedOptions(v: View) {
         if (!isVisible) return
-        activity?.let {
-            val advOptionsDialog = AdvOptionsDialog()
-            advOptionsDialog.arguments = Bundle().apply { putInt(AdvOptionsDialog.MODE_KEY, AdvOptionsDialog.MODE_AUDIO) }
-            advOptionsDialog.show(it.supportFragmentManager, "fragment_adv_options")
+        if (!this::optionsDelegate.isInitialized) {
+            val service = playlistModel.service ?: return
+            val activity = activity as? AppCompatActivity ?: return
+            optionsDelegate = PlayerOptionsDelegate(activity, service)
         }
+        optionsDelegate.show(PlayerOptionType.ADVANCED)
     }
 
     private fun setHeaderVisibilities(advFuncVisible: Boolean, playlistSwitchVisible: Boolean,
                                       headerPlayPauseVisible: Boolean, progressBarVisible: Boolean,
-                                      headerTimeVisible: Boolean, searchVisible: Boolean) {
-        this.advFuncVisible = advFuncVisible
-        this.playlistSwitchVisible = playlistSwitchVisible
-        this.headerPlayPauseVisible = headerPlayPauseVisible
-        this.progressBarVisible = progressBarVisible
-        this.headerTimeVisible = headerTimeVisible
-        this.searchVisible = searchVisible
+                                      headerTimeVisible: Boolean, searchVisible: Boolean,
+                                      filter: Boolean = false) {
+        this.advFuncVisible = !filter && advFuncVisible
+        this.playlistSwitchVisible = !filter && playlistSwitchVisible && resources.configuration.orientation != Configuration.ORIENTATION_LANDSCAPE
+        this.headerPlayPauseVisible = !filter && headerPlayPauseVisible
+        this.progressBarVisible = !filter && progressBarVisible
+        this.headerTimeVisible = !filter && headerTimeVisible
+        this.searchVisible = !filter && searchVisible
+        this.searchTextVisible = filter
         restoreHeaderButtonVisibilities()
     }
 
     private fun restoreHeaderButtonVisibilities() {
-        binding.advFunction.visibility = if (advFuncVisible) View.VISIBLE else View.GONE
-        binding.playlistSwitch.visibility = if (playlistSwitchVisible) View.VISIBLE else View.GONE
-        binding.playlistSearch.visibility = if (searchVisible) View.VISIBLE else View.GONE
-        binding.headerPlayPause.visibility = if (headerPlayPauseVisible) View.VISIBLE else View.GONE
-        binding.progressBar.visibility = if (progressBarVisible) View.VISIBLE else View.GONE
-        binding.headerTime.visibility = if (headerTimeVisible) View.VISIBLE else View.GONE
+        binding.progressBar.visibility = if (progressBarVisible) View.VISIBLE else View.INVISIBLE
+        val cl = binding.header
+        TransitionManager.beginDelayedTransition(cl, AutoTransition().setDuration(200))
+        ConstraintSet().apply {
+            clone(cl)
+            setVisibility(R.id.playlist_search, if (searchVisible) ConstraintSet.VISIBLE else ConstraintSet.GONE)
+            setVisibility(R.id.playlist_switch, if (playlistSwitchVisible) ConstraintSet.VISIBLE else ConstraintSet.GONE)
+            setVisibility(R.id.adv_function, if (advFuncVisible) ConstraintSet.VISIBLE else ConstraintSet.GONE)
+            setVisibility(R.id.header_play_pause, if (headerPlayPauseVisible) ConstraintSet.VISIBLE else ConstraintSet.GONE)
+            setVisibility(R.id.header_time, if (headerTimeVisible) ConstraintSet.VISIBLE else ConstraintSet.GONE)
+            setVisibility(R.id.playlist_search_text, if (searchTextVisible) ConstraintSet.VISIBLE else ConstraintSet.GONE)
+            setVisibility(R.id.audio_media_switcher, if (searchTextVisible) ConstraintSet.GONE else ConstraintSet.VISIBLE)
+            applyTo(cl)
+        }
     }
 
-    private fun hideHeaderButtons() {
-        binding.advFunction.visibility = View.GONE
-        binding.playlistSwitch.visibility = View.GONE
-        binding.playlistSearch.visibility = View.GONE
-        binding.headerPlayPause.visibility = View.GONE
-        binding.progressBar.visibility = View.GONE
-        binding.headerTime.visibility = View.GONE
+    fun onABRepeat(v: View) {
+        playlistModel.toggleABRepeat()
     }
 
     fun onSearchClick(v: View) {
-        binding.playlistSearch.visibility = View.GONE
-        binding.playlistSearchText.visibility = View.VISIBLE
+        setHeaderVisibilities(false, false, false, false, false, false, true)
         binding.playlistSearchText.editText?.requestFocus()
-        val imm = VLCApplication.getAppContext().getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+        if (binding.showCover) onPlaylistSwitchClick(binding.playlistSwitch)
+        val imm = v.context.applicationContext.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
         imm.showSoftInput(binding.playlistSearchText.editText, InputMethodManager.SHOW_IMPLICIT)
-        handler.postDelayed(hideSearchRunnable, SEARCH_TIMEOUT_MILLIS.toLong())
+        handler.postDelayed(hideSearchRunnable, SEARCH_TIMEOUT_MILLIS)
     }
 
     override fun beforeTextChanged(charSequence: CharSequence, start: Int, before: Int, count: Int) {}
 
-    fun clearSearch(): Boolean {
+    fun backPressed(): Boolean {
+        if (this::optionsDelegate.isInitialized && optionsDelegate.isShowing()) {
+            optionsDelegate.hide()
+            return true
+        }
+        return clearSearch()
+    }
+
+    private fun clearSearch(): Boolean {
         if (this::playlistModel.isInitialized) playlistModel.filter(null)
         return hideSearchField()
     }
@@ -440,17 +456,17 @@ class AudioPlayer : Fragment(), PlaylistAdapter.IPlayer, TextWatcher, PlaybackSe
             addTextChangedListener(this@AudioPlayer)
         }
         UiTools.setKeyboardVisibility(binding.playlistSearchText, false)
-        binding.playlistSearch.visibility = View.VISIBLE
-        binding.playlistSearchText.visibility = View.GONE
+        if (playerState == BottomSheetBehavior.STATE_COLLAPSED) setHeaderVisibilities(false, false, true, true, true, false)
+        else setHeaderVisibilities(true, true, false, false, false, true)
         return true
     }
 
     override fun onTextChanged(charSequence: CharSequence, start: Int, before: Int, count: Int) {
         val length = charSequence.length
-        if (length > 1) {
+        if (length > 0) {
             playlistModel.filter(charSequence)
             handler.removeCallbacks(hideSearchRunnable)
-        } else if (length == 0) {
+        } else {
             playlistModel.filter(null)
             hideSearchField()
         }
@@ -458,20 +474,15 @@ class AudioPlayer : Fragment(), PlaylistAdapter.IPlayer, TextWatcher, PlaybackSe
 
     override fun afterTextChanged(editable: Editable) {}
 
-    override fun onConnected(service: PlaybackService) {
-        this.service = service
-        playlistModel = PlaylistModel.get(this, service).apply { setup() }
-        playlistModel.progress.observe(this,  Observer { it?.let { updateProgress(it) } })
-        playlistModel.dataset.observe(this, Observer {
-            playlistAdapter.update(it!!)
-            updateActor.offer(Unit)
-        })
-        playlistAdapter.setService(service)
+    private val playlistObserver = Observer<MutableList<AbstractMediaWrapper>> {
+        playlistAdapter.update(it!!)
+        updateActor.offer(Unit)
     }
 
-    override fun onDisconnected() {
-        playlistModel.onCleared()
-        service = null
+    override fun onDestroy() {
+        super.onDestroy()
+        if (this::optionsDelegate.isInitialized) optionsDelegate.release()
+        playlistModel.dataset.removeObserver(playlistObserver)
     }
 
     private inner class LongSeekListener(internal var forward: Boolean, internal var normal: Int, internal var pressed: Int) : View.OnTouchListener {
@@ -484,7 +495,7 @@ class AudioPlayer : Fragment(), PlaylistAdapter.IPlayer, TextWatcher, PlaybackSe
         internal var seekRunnable: Runnable = object : Runnable {
             override fun run() {
                 if (!vibrated) {
-                    (VLCApplication.getAppContext().getSystemService(Context.VIBRATOR_SERVICE) as android.os.Vibrator)
+                    (VLCApplication.appContext.getSystemService(Context.VIBRATOR_SERVICE) as android.os.Vibrator)
                             .vibrate(80)
                     vibrated = true
                 }
@@ -504,14 +515,13 @@ class AudioPlayer : Fragment(), PlaylistAdapter.IPlayer, TextWatcher, PlaybackSe
         }
 
         override fun onTouch(v: View, event: MotionEvent): Boolean {
-            if (service === null) return false
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
                     (if (forward) binding.next else binding.previous).setImageResource(this.pressed)
-                    possibleSeek = service?.time?.toInt() ?: 0
+                    possibleSeek = playlistModel.time.toInt()
                     previewingSeek = true
                     vibrated = false
-                    length = service?.length ?: 0L
+                    length = playlistModel.length
                     handler.postDelayed(seekRunnable, 1000)
                     return true
                 }
@@ -524,13 +534,13 @@ class AudioPlayer : Fragment(), PlaylistAdapter.IPlayer, TextWatcher, PlaybackSe
                         if (forward) onNextClick(v) else onPreviousClick(v)
                     } else {
                         if (forward) {
-                            if (possibleSeek < service?.length ?: 0L)
-                                service?.time = possibleSeek.toLong()
+                            if (possibleSeek < playlistModel.length)
+                                playlistModel.time = possibleSeek.toLong()
                             else
                                 onNextClick(v)
                         } else {
                             if (possibleSeek > 0)
-                                service?.time = possibleSeek.toLong()
+                                playlistModel.time = possibleSeek.toLong()
                             else
                                 onPreviousClick(v)
                         }
@@ -544,24 +554,24 @@ class AudioPlayer : Fragment(), PlaylistAdapter.IPlayer, TextWatcher, PlaybackSe
 
     private fun showPlaylistTips() {
         val activity = activity as? AudioPlayerContainerActivity
-        activity?.showTipViewIfNeeded(R.id.audio_playlist_tips, Constants.PREF_PLAYLIST_TIPS_SHOWN)
+        activity?.showTipViewIfNeeded(R.id.audio_playlist_tips, PREF_PLAYLIST_TIPS_SHOWN)
     }
 
     fun onStateChanged(newState: Int) {
         playerState = newState
         when (newState) {
             BottomSheetBehavior.STATE_COLLAPSED -> {
-                hideSearchField()
+                backPressed()
                 binding.header.setBackgroundResource(DEFAULT_BACKGROUND_DARKER_ID)
-                setHeaderVisibilities(false, false, true, true, true, false)
+                setHeaderVisibilities(advFuncVisible = false, playlistSwitchVisible = false, headerPlayPauseVisible = true, progressBarVisible = true, headerTimeVisible = true, searchVisible = false)
             }
             BottomSheetBehavior.STATE_EXPANDED -> {
-                binding.header.setBackgroundResource(0)
-                setHeaderVisibilities(true, true, false, false, false, true)
+                binding.header.setBackgroundColor(UiTools.getColorFromAttribute(requireContext(), R.attr.audio_player_transparent))
+                setHeaderVisibilities(advFuncVisible = true, playlistSwitchVisible = true, headerPlayPauseVisible = false, progressBarVisible = false, headerTimeVisible = false, searchVisible = true)
                 showPlaylistTips()
-                service?.apply { playlistAdapter.currentIndex = currentMediaPosition }
+                playlistAdapter.currentIndex = playlistModel.currentMediaPosition
             }
-            else -> binding.header.setBackgroundResource(0)
+//            else -> binding.header.setBackgroundResource(0)
         }
     }
 
@@ -572,9 +582,9 @@ class AudioPlayer : Fragment(), PlaylistAdapter.IPlayer, TextWatcher, PlaybackSe
         override fun onStartTrackingTouch(seekBar: SeekBar) {}
 
         override fun onProgressChanged(sb: SeekBar, progress: Int, fromUser: Boolean) {
-            if (fromUser) service?.apply {
-                time = progress.toLong()
-                binding.time.text = Tools.millisToString(if (showRemainingTime) progress - length else progress.toLong())
+            if (fromUser) {
+                playlistModel.time = progress.toLong()
+                binding.time.text = Tools.millisToString(if (showRemainingTime) progress - playlistModel.length else progress.toLong())
                 binding.headerTime.text = Tools.millisToString(progress.toLong())
             }
         }
@@ -585,35 +595,34 @@ class AudioPlayer : Fragment(), PlaylistAdapter.IPlayer, TextWatcher, PlaybackSe
         override fun onMediaSwitching() {}
 
         override fun onMediaSwitched(position: Int) {
-           service?.apply {
-               when (position) {
-                   AudioMediaSwitcherListener.PREVIOUS_MEDIA -> previous(true)
-                   AudioMediaSwitcherListener.NEXT_MEDIA ->  next()
-               }
-           }
+            when (position) {
+                AudioMediaSwitcherListener.PREVIOUS_MEDIA -> playlistModel.previous(true)
+                AudioMediaSwitcherListener.NEXT_MEDIA -> playlistModel.next()
+            }
         }
-
-        override fun onTouchDown() = hideHeaderButtons()
-
-        override fun onTouchUp() = restoreHeaderButtonVisibilities()
 
         override fun onTouchClick() {
             val activity = activity as AudioPlayerContainerActivity
             activity.slideUpOrDownAudioPlayer()
         }
+
+        override fun onTouchDown() {}
+
+        override fun onTouchUp() {}
     }
 
     private val mCoverMediaSwitcherListener = object : AudioMediaSwitcherListener {
 
-        override fun onMediaSwitching() {}
+        override fun onMediaSwitching() {
+            (activity as? AudioPlayerContainerActivity)?.bottomSheetBehavior?.lock(true)
+        }
 
         override fun onMediaSwitched(position: Int) {
-            service?.apply {
-                when (position) {
-                    AudioMediaSwitcherListener.PREVIOUS_MEDIA -> previous(true)
-                    AudioMediaSwitcherListener.NEXT_MEDIA -> next()
-                }
+            when (position) {
+                AudioMediaSwitcherListener.PREVIOUS_MEDIA -> playlistModel.previous(true)
+                AudioMediaSwitcherListener.NEXT_MEDIA -> playlistModel.next()
             }
+            (activity as? AudioPlayerContainerActivity)?.bottomSheetBehavior?.lock(false)
         }
 
         override fun onTouchDown() {}

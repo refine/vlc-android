@@ -1,62 +1,107 @@
 <?xml version="1.0" encoding="utf-8"?>
-<layout xmlns:app="http://schemas.android.com/apk/res-auto"
-    xmlns:android="http://schemas.android.com/apk/res/android" >
+<layout
+        xmlns:android="http://schemas.android.com/apk/res/android"
+        xmlns:app="http://schemas.android.com/apk/res-auto">
+
     <data>
-        <import type="org.videolan.medialibrary.media.MediaWrapper"/>
+
+        <import type="org.videolan.medialibrary.interfaces.media.AbstractMediaWrapper"/>
+
         <import type="android.text.TextUtils"/>
+
         <import type="android.view.View"/>
+
         <variable
-            name="holder"
-            type="org.videolan.vlc.gui.HistoryAdapter.ViewHolder"/>
+                name="holder"
+                type="org.videolan.vlc.gui.HistoryAdapter.ViewHolder"/>
+
         <variable
-            name="media"
-            type="MediaWrapper"/>
+                name="media"
+                type="org.videolan.medialibrary.interfaces.media.AbstractMediaWrapper"/>
+
         <variable
-            name="bgColor"
-            type="int" />
+                name="cover"
+                type="android.graphics.drawable.BitmapDrawable"/>
+
+        <variable
+                name="bgColor"
+                type="int"/>
     </data>
-    <android.support.constraint.ConstraintLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:background="@{bgColor}"
-        android:clickable="true"
-        android:onClick="@{holder::onClick}"
-        android:paddingBottom="4dp"
-        android:paddingTop="4dp"
-        android:focusable="true"
-        android:onLongClick="@{holder::onLongClick}"  >
-        <ImageView
-            android:id="@+id/icon"
-            android:layout_width="wrap_content"
+
+    <androidx.constraintlayout.widget.ConstraintLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:scaleType="centerCrop"
-            android:src="@{media.type == MediaWrapper.TYPE_VIDEO ? @drawable/ic_browser_video_normal : @drawable/ic_browser_audio_normal}"
-            app:layout_constraintStart_toStartOf="parent" />
+            android:background="@{bgColor}"
+            android:clickable="true"
+            android:focusable="true"
+            android:minHeight="@dimen/audio_browser_item_size"
+            android:onClick="@{holder::onClick}"
+            android:onLongClick="@{holder::onLongClick}">
+
+        <androidx.constraintlayout.widget.ConstraintLayout
+                android:layout_width="0dp"
+                android:layout_marginStart="16dp"
+                android:layout_marginTop="8dp"
+                app:layout_constraintBottom_toBottomOf="parent"
+                app:layout_constraintDimensionRatio="16:10"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintTop_toTopOf="parent"
+                android:layout_marginBottom="8dp"
+                android:layout_height="@dimen/audio_browser_item_size"
+                android:id="@+id/constraintLayout4">
+
+            <ImageView
+                    android:layout_width="0dp"
+                    android:layout_height="0dp"
+                    app:srcCompat="@drawable/ic_no_song_vertical"
+                    android:id="@+id/song_marker"
+                    app:layout_constraintEnd_toStartOf="@+id/icon"
+                    app:layout_constraintStart_toStartOf="parent"
+                    app:layout_constraintBottom_toBottomOf="parent"
+                    app:layout_constraintTop_toTopOf="parent"/>
+
+            <ImageView
+                    android:id="@+id/icon"
+                    android:layout_width="0dp"
+                    android:layout_height="@dimen/audio_browser_item_size"
+                    android:layout_gravity="center"
+                    android:onClick="@{holder::onImageClick}"
+                    android:scaleType="centerCrop"
+                    android:src="@{cover}"
+                    app:layout_constraintDimensionRatio="1"
+                    app:layout_constraintTop_toTopOf="parent"
+                    app:layout_constraintBottom_toBottomOf="parent"
+                    app:media="@{media}"
+                    app:layout_constraintEnd_toEndOf="parent"/>
+        </androidx.constraintlayout.widget.ConstraintLayout>
+
 
         <TextView
-            android:id="@+id/title"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:text="@{media.title}"
-            style="@style/VLC.TextViewTitle"
-            android:maxLines="1"
-            app:layout_constraintBottom_toTopOf="@+id/subtitle"
-            app:layout_constraintTop_toTopOf="parent"
-            app:layout_constraintStart_toEndOf="@id/icon"
-            app:layout_constraintEnd_toEndOf="parent"
-            app:layout_constraintVertical_chainStyle="packed" />
+                android:id="@+id/title"
+                style="@style/VLC.TextViewTitle"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:maxLines="1"
+                android:layout_marginStart="16dp"
+                android:text="@{media.title}"
+                app:layout_constraintBottom_toTopOf="@+id/subtitle"
+                app:layout_constraintEnd_toEndOf="parent"
+                app:layout_constraintStart_toEndOf="@+id/constraintLayout4"
+                app:layout_constraintTop_toTopOf="parent"
+                app:layout_constraintVertical_chainStyle="packed"/>
 
         <TextView
-            android:id="@+id/subtitle"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:text="@{media.artist}"
-            style="@style/VLC.TextViewDescription"
-            android:visibility="@{TextUtils.isEmpty(media.artist) ? View.GONE : View.VISIBLE}"
-            app:layout_constraintBottom_toBottomOf="parent"
-            app:layout_constraintTop_toBottomOf="@id/title"
-            app:layout_constraintStart_toEndOf="@id/icon"
-            app:layout_constraintEnd_toEndOf="parent"/>
+                android:id="@+id/subtitle"
+                style="@style/VLC.TextViewDescription"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="16dp"
+                android:text="@{media.artist}"
+                android:visibility="@{TextUtils.isEmpty(media.artist) ? View.GONE : View.VISIBLE}"
+                app:layout_constraintBottom_toBottomOf="parent"
+                app:layout_constraintEnd_toEndOf="parent"
+                app:layout_constraintStart_toEndOf="@+id/constraintLayout4"
+                app:layout_constraintTop_toBottomOf="@id/title"/>
 
-    </android.support.constraint.ConstraintLayout>
+    </androidx.constraintlayout.widget.ConstraintLayout>
 </layout>

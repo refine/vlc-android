@@ -33,15 +33,16 @@ import android.os.Binder;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.RemoteException;
-import android.support.annotation.Nullable;
+import androidx.annotation.Nullable;
 import android.text.TextUtils;
 import android.util.Log;
 
+import org.videolan.medialibrary.MLServiceLocator;
+import org.videolan.medialibrary.interfaces.media.AbstractMediaWrapper;
 import org.videolan.vlc.extensions.api.IExtensionHost;
 import org.videolan.vlc.extensions.api.IExtensionService;
 import org.videolan.vlc.extensions.api.VLCExtensionItem;
 import org.videolan.vlc.media.MediaUtils;
-import org.videolan.medialibrary.media.MediaWrapper;
 
 import java.util.List;
 
@@ -201,13 +202,13 @@ public class ExtensionManagerService extends Service {
 
             @Override
             public void playUri(Uri uri, String title) throws RemoteException {
-                final MediaWrapper media = new MediaWrapper(uri);
+                final AbstractMediaWrapper media = MLServiceLocator.getAbstractMediaWrapper(uri);
                 if (!TextUtils.isEmpty(title));
                     media.setDisplayTitle(title);
                 mHandler.post(new Runnable() {
                     @Override
                     public void run() {
-                        MediaUtils.openMediaNoUi(ExtensionManagerService.this, media);
+                        MediaUtils.INSTANCE.openMediaNoUi(ExtensionManagerService.this, media);
                     }
                 });
             }

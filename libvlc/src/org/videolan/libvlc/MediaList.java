@@ -23,6 +23,8 @@ package org.videolan.libvlc;
 import android.os.Handler;
 import android.util.SparseArray;
 
+import androidx.annotation.Nullable;
+
 @SuppressWarnings("unused, JniMissingFunction")
 public class MediaList extends VLCObject<MediaList.Event> {
     private final static String TAG = "LibVLC/MediaList";
@@ -104,10 +106,9 @@ public class MediaList extends VLCObject<MediaList.Event> {
     }
 
     private synchronized Media insertMediaFromEvent(int index) {
-        mCount++;
-
         for (int i = mCount - 1; i >= index; --i)
             mMediaArray.put(i + 1, mMediaArray.valueAt(i));
+        mCount++;
         final Media media = new Media(this, index);
         mMediaArray.put(index, media);
         return media;
@@ -129,7 +130,7 @@ public class MediaList extends VLCObject<MediaList.Event> {
     }
 
     @Override
-    protected synchronized Event onEventNative(int eventType, long arg1, long arg2, float  argf1) {
+    protected synchronized Event onEventNative(int eventType, long arg1, long arg2, float  argf1, @Nullable String args1) {
         if (mLocked)
             throw new IllegalStateException("already locked from event callback");
         mLocked = true;

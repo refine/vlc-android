@@ -1,57 +1,73 @@
+/*
+ * *************************************************************************
+ *  NowPlayingDelegate.kt
+ * **************************************************************************
+ *  Copyright © 2019 VLC authors and VideoLAN
+ *
+ *  This program is free software; you can redistribute it and/or modify
+ *  it under the terms of the GNU General Public License as published by
+ *  the Free Software Foundation; either version 2 of the License, or
+ *  (at your option) any later version.
+ *
+ *  This program is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ *  GNU General Public License for more details.
+ *
+ *  You should have received a copy of the GNU General Public License
+ *  along with this program; if not, write to the Free Software
+ *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston MA 02110-1301, USA.
+ *  ***************************************************************************
+ */
+
 package org.videolan.vlc.gui.tv
 
-import android.arch.lifecycle.Observer
+import androidx.lifecycle.Observer
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.ObsoleteCoroutinesApi
+import kotlinx.coroutines.launch
 import org.videolan.libvlc.MediaPlayer
-import org.videolan.medialibrary.media.DummyItem
 import org.videolan.vlc.PlaybackService
-import org.videolan.vlc.gui.PlaybackServiceActivity
 import org.videolan.vlc.media.PlaylistManager
-import org.videolan.vlc.util.Constants
 import org.videolan.vlc.util.EmptyPBSCallback
+import org.videolan.vlc.viewmodels.tv.MainTvModel
 
-
-class NowPlayingDelegate(private val fragment: MainTvFragment): PlaybackService.Client.Callback, PlaybackService.Callback by EmptyPBSCallback {
+@ExperimentalCoroutinesApi
+@ObsoleteCoroutinesApi
+class NowPlayingDelegate(private val model: MainTvModel): PlaybackService.Callback by EmptyPBSCallback {
     private var service: PlaybackService? = null
-    private val helper = PlaybackServiceActivity.Helper(fragment.requireActivity(), this)
-    private val observer = Observer<Boolean> {
-        when {
-            it != true -> {
-                helper.onStop()
-                updateCurrent()
-            }
-            service === null -> helper.onStart()
-            else -> updateCurrent()
+
+    private val playbackServiceObserver = Observer<PlaybackService> { service ->
+        if (service !== null) {
+            this.service = service
+            service.addCallback(this)
+        } else this.service?.let {
+            it.removeCallback(this)
+            this.service = null
         }
+        updateCurrent()
     }
 
+    private val nowPlayingObserver = Observer<Boolean> { updateCurrent() }
+
     init {
-        PlaylistManager.showAudioPlayer.observe(fragment, observer)
+        PlaybackService.service.observeForever(playbackServiceObserver)
+        PlaylistManager.showAudioPlayer.observeForever(nowPlayingObserver)
     }
 
     fun onClear() {
-        PlaylistManager.showAudioPlayer.removeObserver(observer)
+        PlaybackService.service.removeObserver(playbackServiceObserver)
+        PlaylistManager.showAudioPlayer.removeObserver(nowPlayingObserver)
     }
 
     override fun onMediaPlayerEvent(event: MediaPlayer.Event) {
         when (event.type) {
-            MediaPlayer.Event.MediaChanged -> updateCurrent()
+            MediaPlayer.Event.Playing -> updateCurrent()
         }
     }
 
-    private fun updateCurrent() {
-        fragment.updateAudioCategories(service?.currentMediaWrapper?.let {
-            DummyItem(Constants.CATEGORY_NOW_PLAYING, it.title, it.artist).apply { setArtWork(service?.coverArt) }
-        })
-    }
-
-    override fun onConnected(service: PlaybackService) {
-        this.service = service
-        updateCurrent()
-        service.addCallback(this)
-    }
-
-    override fun onDisconnected() {
-        service?.removeCallback(this)
-        service = null
+    private fun updateCurrent() = model.run {
+        updateNowPlaying()
+        if (showHistory) launch { updateHistory() }
     }
 }

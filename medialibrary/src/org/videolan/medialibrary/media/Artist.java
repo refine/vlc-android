@@ -1,104 +1,85 @@
 package org.videolan.medialibrary.media;
 
 import android.os.Parcel;
-import android.os.Parcelable;
 
-import org.videolan.libvlc.util.VLCUtil;
-import org.videolan.medialibrary.Medialibrary;
-import org.videolan.medialibrary.R;
+import org.videolan.medialibrary.interfaces.AbstractMedialibrary;
+import org.videolan.medialibrary.interfaces.media.AbstractAlbum;
+import org.videolan.medialibrary.interfaces.media.AbstractArtist;
+import org.videolan.medialibrary.interfaces.media.AbstractMediaWrapper;
 
-public class Artist extends MediaLibraryItem {
+import androidx.annotation.NonNull;
 
-    private String shortBio;
-    private String artworkMrl;
-    private String musicBrainzId;
-
-    static class SpecialRes {
-        static String UNKNOWN_ARTIST = Medialibrary.getContext().getString(R.string.unknown_artist);
-        static String VARIOUS_ARTISTS = Medialibrary.getContext().getString(R.string.various_artists);
-    }
+@SuppressWarnings("JniMissingFunction")
+public class Artist extends AbstractArtist {
 
     public Artist(long id, String name, String shortBio, String artworkMrl, String musicBrainzId) {
-        super(id, name);
-        this.shortBio = shortBio;
-        this.artworkMrl = artworkMrl != null ? VLCUtil.UriFromMrl(artworkMrl).getPath() : null;
-        this.musicBrainzId = musicBrainzId;
-        if (id == 1L) {
-            mTitle = SpecialRes.UNKNOWN_ARTIST;
-        } else if (id == 2L) {
-            mTitle = SpecialRes.VARIOUS_ARTISTS;
-        }
+        super(id, name, shortBio, artworkMrl, musicBrainzId);
     }
 
-    public String getShortBio() {
-        return shortBio;
-    }
-
-    public String getArtworkMrl() {
-        return artworkMrl;
-    }
-
-    public String getMusicBrainzId() {
-        return musicBrainzId;
-    }
-
-    public void setShortBio(String shortBio) {
-        this.shortBio = shortBio;
-    }
-
-    public void setArtworkMrl(String artworkMrl) {
-        this.artworkMrl = artworkMrl;
-    }
-
-    public Album[] getAlbums() {
-        return getAlbums(Medialibrary.SORT_DEFAULT, false);
-    }
-
-    public Album[] getAlbums(int sort, boolean desc) {
-        final Medialibrary ml = Medialibrary.getInstance();
-        return ml != null && ml.isInitiated() ? nativeGetAlbumsFromArtist(ml, mId, sort, desc) : new Album[0];
-    }
-
-    public MediaWrapper[] getTracks() {
-        return getTracks(Medialibrary.SORT_DEFAULT, false);
-    }
-
-    public MediaWrapper[] getTracks(int sort, boolean desc) {
-        final Medialibrary ml = Medialibrary.getInstance();
-        return ml != null && ml.isInitiated() ? nativeGetMediaFromArtist(ml, mId, sort, desc) : Medialibrary.EMPTY_COLLECTION;
-    }
-
-    @Override
-    public int getItemType() {
-        return TYPE_ARTIST;
-    }
-
-    private native Album[] nativeGetAlbumsFromArtist(Medialibrary ml, long mId, int sort, boolean desc);
-    private native MediaWrapper[] nativeGetMediaFromArtist(Medialibrary ml, long mId, int sort, boolean desc);
-
-    @Override
-    public void writeToParcel(Parcel parcel, int i) {
-        super.writeToParcel(parcel, i);
-        parcel.writeString(shortBio);
-        parcel.writeString(artworkMrl);
-        parcel.writeString(musicBrainzId);
-    }
-
-    public static Parcelable.Creator<Artist> CREATOR
-            = new Parcelable.Creator<Artist>() {
-        public Artist createFromParcel(Parcel in) {
-            return new Artist(in);
-        }
-
-        public Artist[] newArray(int size) {
-            return new Artist[size];
-        }
-    };
-
-    private Artist(Parcel in) {
+    public Artist(Parcel in) {
         super(in);
-        this.shortBio = in.readString();
-        this.artworkMrl = in.readString();
-        this.musicBrainzId = in.readString();
     }
+
+    public AbstractAlbum[] getAlbums(int sort, boolean desc) {
+        final AbstractMedialibrary ml = AbstractMedialibrary.getInstance();
+        return ml.isInitiated() ? nativeGetAlbums(ml, mId, sort, desc) : new AbstractAlbum[0];
+    }
+
+    @NonNull
+    public AbstractAlbum[] getPagedAlbums(int sort, boolean desc, int nbItems, int offset) {
+        final AbstractMedialibrary ml = AbstractMedialibrary.getInstance();
+        return ml.isInitiated() ? nativeGetPagedAlbums(ml, mId, sort, desc, nbItems, offset) : new AbstractAlbum[0];
+    }
+
+    public AbstractAlbum[] searchAlbums(String query, int sort, boolean desc, int nbItems, int offset) {
+        final AbstractMedialibrary ml = AbstractMedialibrary.getInstance();
+        return ml.isInitiated() ? nativeSearchAlbums(ml, mId, query, sort, desc, nbItems, offset) : new AbstractAlbum[0];
+    }
+
+    public int searchAlbumsCount(String query) {
+        final AbstractMedialibrary ml = AbstractMedialibrary.getInstance();
+        return ml.isInitiated() ? nativeGetSearchAlbumCount(ml, mId, query) : 0;
+    }
+
+    public AbstractMediaWrapper[] searchTracks(String query, int sort, boolean desc, int nbItems, int offset) {
+        final AbstractMedialibrary ml = AbstractMedialibrary.getInstance();
+        return ml.isInitiated() ? nativeSearch(ml, mId, query, sort, desc, nbItems, offset) : AbstractMedialibrary.EMPTY_COLLECTION;
+    }
+
+    public int searchTracksCount(String query) {
+        final AbstractMedialibrary ml = AbstractMedialibrary.getInstance();
+        return ml.isInitiated() ? nativeGetSearchCount(ml, mId, query) : 0;
+    }
+
+    public int getAlbumsCount() {
+        AbstractMedialibrary ml = AbstractMedialibrary.getInstance();
+        return ml.isInitiated() ? nativeGetAlbumsCount(ml, mId) : 0;
+    }
+
+    public AbstractMediaWrapper[] getTracks(int sort, boolean desc) {
+        final AbstractMedialibrary ml = AbstractMedialibrary.getInstance();
+        return ml.isInitiated() ? nativeGetMedia(ml, mId, sort, desc) : AbstractMedialibrary.EMPTY_COLLECTION;
+    }
+
+    public AbstractMediaWrapper[] getPagedTracks(int sort, boolean desc, int nbItems, int offset) {
+        final AbstractMedialibrary ml = AbstractMedialibrary.getInstance();
+        return ml.isInitiated() ? nativeGetPagedMedia(ml, mId, sort, desc, nbItems, offset) : AbstractMedialibrary.EMPTY_COLLECTION;
+    }
+
+    @Override
+    public int getTracksCount() {
+        AbstractMedialibrary ml = AbstractMedialibrary.getInstance();
+        return ml.isInitiated() ? nativeGetTracksCount(ml, mId) : 0;
+    }
+
+    private native AbstractAlbum[] nativeGetAlbums(AbstractMedialibrary ml, long mId, int sort, boolean desc);
+    private native AbstractMediaWrapper[] nativeGetMedia(AbstractMedialibrary ml, long mId, int sort, boolean desc);
+    private native AbstractAlbum[] nativeGetPagedAlbums(AbstractMedialibrary ml, long mId, int sort, boolean desc, int nbItems, int offset);
+    private native AbstractMediaWrapper[] nativeGetPagedMedia(AbstractMedialibrary ml, long mId, int sort, boolean desc, int nbItems, int offset);
+    private native AbstractAlbum[] nativeSearchAlbums(AbstractMedialibrary ml, long mId, String query, int sort, boolean desc, int nbItems, int offset);
+    private native AbstractMediaWrapper[] nativeSearch(AbstractMedialibrary ml, long mId, String query, int sort, boolean desc, int nbItems, int offset);
+    private native int nativeGetTracksCount(AbstractMedialibrary ml, long mId);
+    private native int nativeGetAlbumsCount(AbstractMedialibrary ml, long mId);
+    private native int nativeGetSearchCount(AbstractMedialibrary ml, long mId, String query);
+    private native int nativeGetSearchAlbumCount(AbstractMedialibrary ml, long mId, String query);
 }

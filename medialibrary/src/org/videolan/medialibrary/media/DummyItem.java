@@ -4,7 +4,8 @@ import android.os.Parcel;
 import android.os.Parcelable;
 import android.text.TextUtils;
 
-import org.videolan.medialibrary.Medialibrary;
+import org.videolan.medialibrary.interfaces.AbstractMedialibrary;
+import org.videolan.medialibrary.interfaces.media.AbstractMediaWrapper;
 
 public class DummyItem extends MediaLibraryItem {
 
@@ -20,8 +21,13 @@ public class DummyItem extends MediaLibraryItem {
     }
 
     @Override
-    public MediaWrapper[] getTracks() {
-        return Medialibrary.EMPTY_COLLECTION;
+    public AbstractMediaWrapper[] getTracks() {
+        return AbstractMedialibrary.EMPTY_COLLECTION;
+    }
+
+    @Override
+    public int getTracksCount() {
+        return 1;
     }
 
     @Override
@@ -45,10 +51,12 @@ public class DummyItem extends MediaLibraryItem {
 
     public static Parcelable.Creator<DummyItem> CREATOR
             = new Parcelable.Creator<DummyItem>() {
+        @Override
         public DummyItem createFromParcel(Parcel in) {
             return new DummyItem(in);
         }
 
+        @Override
         public DummyItem[] newArray(int size) {
             return new DummyItem[size];
         }

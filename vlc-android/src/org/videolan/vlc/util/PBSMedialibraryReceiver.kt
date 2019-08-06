@@ -24,7 +24,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.support.v4.content.LocalBroadcastManager
+import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import org.videolan.vlc.PlaybackService
 import org.videolan.vlc.VLCApplication
 import org.videolan.vlc.startMedialibrary

@@ -1,7 +1,7 @@
 /*****************************************************************************
  * HistoryModel.kt
  *****************************************************************************
- * Copyright © 2018 VLC authors and VideoLAN
+ * Copyright © 2018-2019 VLC authors and VideoLAN
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -20,31 +20,36 @@
 
 package org.videolan.vlc.viewmodels
 
-import kotlinx.coroutines.experimental.withContext
-import org.videolan.medialibrary.Medialibrary
-import org.videolan.medialibrary.media.MediaWrapper
-import org.videolan.vlc.util.VLCIO
+import android.content.Context
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import org.videolan.medialibrary.interfaces.media.AbstractMediaWrapper
 
-class HistoryModel: BaseModel<MediaWrapper>() {
+class HistoryModel(context: Context) : MedialibraryModel<AbstractMediaWrapper>(context) {
 
     override fun canSortByName() = false
 
-    override fun fetch() {
-        refresh()
-    }
-
     override suspend fun updateList() {
-        dataset.value = withContext(VLCIO) { Medialibrary.getInstance().lastMediaPlayed().toMutableList() }
+        dataset.value = withContext(Dispatchers.Default) { medialibrary.lastMediaPlayed().toMutableList() }
     }
 
-    fun moveUp(media: MediaWrapper) {
+    fun moveUp(media: AbstractMediaWrapper) {
         dataset.value = dataset.value.apply {
             remove(media)
             add(0, media)
         }
     }
 
-    fun clear() {
+    fun clearHistory() {
         dataset.value = mutableListOf()
+    }
+
+    class Factory(private val context: Context) : ViewModelProvider.Factory {
+        override fun <T : ViewModel> create(modelClass: Class<T>): T {
+            @Suppress("UNCHECKED_CAST")
+            return HistoryModel(context.applicationContext) as T
+        }
     }
 }

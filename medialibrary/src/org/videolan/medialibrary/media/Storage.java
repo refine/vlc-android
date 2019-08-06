@@ -6,14 +6,22 @@ import android.os.Parcel;
 import android.os.Parcelable;
 import android.text.TextUtils;
 
+import org.videolan.medialibrary.interfaces.AbstractMedialibrary;
+import org.videolan.medialibrary.interfaces.media.AbstractMediaWrapper;
+
 public class Storage extends MediaLibraryItem {
 
     Uri uri;
     String description;
 
     @Override
-    public MediaWrapper[] getTracks() {
-        return new MediaWrapper[0];
+    public AbstractMediaWrapper[] getTracks() {
+        return AbstractMedialibrary.EMPTY_COLLECTION;
+    }
+
+    @Override
+    public int getTracksCount() {
+        return 1;
     }
 
     @Override
@@ -34,10 +42,12 @@ public class Storage extends MediaLibraryItem {
         mTitle = name;
     }
 
+    @Override
     public void setDescription(String description) {
         this.description = description;
     }
 
+    @Override
     public String getDescription() {
         return description;
     }
@@ -55,10 +65,12 @@ public class Storage extends MediaLibraryItem {
 
     public static Parcelable.Creator<Storage> CREATOR
             = new Parcelable.Creator<Storage>() {
+        @Override
         public Storage createFromParcel(Parcel in) {
             return new Storage(in);
         }
 
+        @Override
         public Storage[] newArray(int size) {
             return new Storage[size];
         }

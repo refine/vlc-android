@@ -20,33 +20,22 @@
 
 package org.videolan.vlc.viewmodels
 
-import org.videolan.medialibrary.Medialibrary
-import org.videolan.medialibrary.interfaces.MediaAddedCb
-import org.videolan.medialibrary.interfaces.MediaUpdatedCb
+import android.content.Context
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.ObsoleteCoroutinesApi
 import org.videolan.medialibrary.media.MediaLibraryItem
-import org.videolan.vlc.util.EmptyMLCallbacks
-import org.videolan.vlc.util.uiJob
 
+@ObsoleteCoroutinesApi
+@ExperimentalCoroutinesApi
+abstract class MedialibraryModel<T : MediaLibraryItem>(context: Context) : BaseModel<T>(context), ICallBackHandler by CallBackDelegate() {
 
-abstract class MedialibraryModel<T : MediaLibraryItem> : BaseModel<T>(), Medialibrary.OnMedialibraryReadyListener, MediaUpdatedCb by EmptyMLCallbacks, MediaAddedCb by EmptyMLCallbacks {
-
-    val medialibrary = Medialibrary.getInstance()
-
-    override fun fetch() {
-        medialibrary.addOnMedialibraryReadyListener(this)
-        if (medialibrary.isStarted) onMedialibraryReady()
-    }
-
-    override fun onMedialibraryReady() {
-        uiJob { refresh() }
-    }
-
-    override fun onMedialibraryIdle() {
-        uiJob { refresh() }
+    init {
+        @Suppress("LeakingThis")
+        registerCallBacks { refresh() }
     }
 
     override fun onCleared() {
+        releaseCallbacks()
         super.onCleared()
-        medialibrary.removeOnMedialibraryReadyListener(this)
     }
 }

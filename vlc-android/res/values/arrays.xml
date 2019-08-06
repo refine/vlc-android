@@ -261,16 +261,18 @@
 
     <string-array name="video_min_group_length_list" translatable="false">
         <item>@string/video_min_group_length_disable</item>
-        <item>@string/video_min_group_length_first</item>
-        <item>@string/video_min_group_length_short</item>
-        <item>@string/video_min_group_length_long</item>
+        <item>@string/video_min_group_length_folder</item>
+        <!--<item>@string/video_min_group_length_first</item>-->
+        <!--<item>@string/video_min_group_length_short</item>-->
+        <!--<item>@string/video_min_group_length_long</item>-->
     </string-array>
 
     <string-array name="video_min_group_length_values" translatable="false">
+        <item>-1</item>
         <item>0</item>
-        <item>1</item>
-        <item>6</item>
-        <item>9</item>
+        <!--<item>1</item>-->
+        <!--<item>6</item>-->
+        <!--<item>9</item>-->
     </string-array>
 
     <string-array name="subtitles_encoding_list" tools:ignore="TypographyDashes">
@@ -405,6 +407,22 @@
         <item>RGB 32-bit</item>
         <item>RGB 16-bit</item>
         <item>YUV</item>
+    </string-array>
+
+    <string-array name="daynight_mode_entries">
+        <item>@string/daynight_follow_system_title</item>
+        <!--item>@string/daynight_battery_title</item-->
+        <item>@string/daynight_title</item>
+        <item>@string/light_theme</item>
+        <item>@string/enable_black_theme</item>
+    </string-array>
+
+    <string-array name="daynight_mode_values">
+        <item>-1</item>
+        <!--item>3</item-->
+        <item>0</item>
+        <item>1</item>
+        <item>2</item>
     </string-array>
 
 </resources>

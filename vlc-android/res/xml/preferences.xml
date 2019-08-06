@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
-    android:title="@string/preferences">
+<androidx.preference.PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
+                                      android:title="@string/preferences">
 
     <PreferenceCategory android:title="@string/medialibrary" >
         <PreferenceScreen
@@ -8,7 +8,7 @@
             android:summary="@string/directories_summary"
             android:title="@string/medialibrary_directories" />
 
-        <CheckBoxPreference
+        <androidx.preference.SwitchPreferenceCompat
             android:defaultValue="true"
             android:key="auto_rescan"
             android:summary="@string/auto_rescan_summary"
@@ -39,7 +39,7 @@
     </PreferenceCategory>
 
     <PreferenceCategory android:title="@string/history" >
-        <CheckBoxPreference
+        <androidx.preference.SwitchPreferenceCompat
             android:defaultValue="true"
             android:key="playback_history"
             android:summary="@string/playback_history_summary"
@@ -49,16 +49,20 @@
     <PreferenceCategory android:title="@string/extra_prefs_category" >
         <Preference
             android:title="@string/interface_prefs_screen"
-            android:key="ui_category" />
+            android:key="ui_category"
+            android:fragment="org.videolan.vlc.gui.tv.preferences.PreferencesUi"/>
         <Preference
             android:title="@string/video_prefs_category"
-            android:key="video_category" />
+            android:key="video_category"
+            android:fragment="org.videolan.vlc.gui.tv.preferences.PreferencesVideo"/>
         <Preference
             android:title="@string/subtitles_prefs_category"
-            android:key="subtitles_category" />
+            android:key="subtitles_category"
+            android:fragment="org.videolan.vlc.gui.tv.preferences.PreferencesSubtitles"/>
         <Preference
             android:title="@string/audio_prefs_category"
-            android:key="audio_category" />
+            android:key="audio_category"
+            android:fragment="org.videolan.vlc.gui.tv.preferences.PreferencesAudio"/>
         <Preference
             android:title="@string/casting_category"
             android:key="casting_category" />
@@ -67,8 +71,9 @@
             android:key="extensions_category" />
         <Preference
             android:title="@string/advanced_prefs_category"
-            android:key="adv_category" />
+            android:key="adv_category"
+            android:fragment="org.videolan.vlc.gui.tv.preferences.PreferencesAdvanced" />
 
     </PreferenceCategory>
 
-</PreferenceScreen>
+</androidx.preference.PreferenceScreen>

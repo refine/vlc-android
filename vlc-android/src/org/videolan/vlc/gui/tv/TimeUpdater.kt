@@ -21,15 +21,16 @@
 package org.videolan.vlc.gui.tv
 
 import android.app.Activity
-import android.arch.lifecycle.Lifecycle
-import android.arch.lifecycle.LifecycleObserver
-import android.arch.lifecycle.OnLifecycleEvent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.support.v4.app.FragmentActivity
 import android.widget.TextView
+import androidx.fragment.app.FragmentActivity
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleObserver
+import androidx.lifecycle.OnLifecycleEvent
+import java.text.DateFormat
 import java.util.*
 
 private const val TAG = "VLC/TimeUpdater"
@@ -37,8 +38,9 @@ private const val TAG = "VLC/TimeUpdater"
 class TimeUpdater(private val activity: Activity, private val tv: TextView) : LifecycleObserver {
 
     private fun updateTime() {
-        val calendar = Calendar.getInstance()
-        tv.text = String.format("%d:%02d", calendar[Calendar.HOUR_OF_DAY], calendar[Calendar.MINUTE])
+
+        val format = DateFormat.getTimeInstance(DateFormat.SHORT, Locale.getDefault())
+        tv.text = format.format(Date())
     }
 
     @OnLifecycleEvent(Lifecycle.Event.ON_START)

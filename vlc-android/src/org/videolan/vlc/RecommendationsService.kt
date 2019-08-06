@@ -28,24 +28,22 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.os.Build
-import android.support.v4.app.NotificationCompat
-import android.support.v4.content.ContextCompat
-import kotlinx.coroutines.experimental.CoroutineStart
-import kotlinx.coroutines.experimental.launch
-import kotlinx.coroutines.experimental.withContext
-
-import org.videolan.medialibrary.media.MediaWrapper
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
+import kotlinx.coroutines.*
+import org.videolan.medialibrary.interfaces.AbstractMedialibrary
+import org.videolan.medialibrary.interfaces.media.AbstractMediaWrapper
 import org.videolan.vlc.gui.helpers.BitmapUtil
 import org.videolan.vlc.gui.video.VideoPlayerActivity
-import org.videolan.vlc.util.Constants
-import org.videolan.vlc.util.Util
 import org.videolan.vlc.util.*
 
 private const val TAG = "VLC/RecommendationsService"
 private const val MAX_RECOMMENDATIONS = 3
 
 @TargetApi(Build.VERSION_CODES.JELLY_BEAN_MR1)
-class RecommendationsService : IntentService("RecommendationService") {
+class RecommendationsService : IntentService("RecommendationService"), CoroutineScope {
+    override val coroutineContext = Dispatchers.Main.immediate
 
     private lateinit var mNotificationManager: NotificationManager
 
@@ -58,7 +56,7 @@ class RecommendationsService : IntentService("RecommendationService") {
         doRecommendations()
     }
 
-    private fun buildRecommendation(mw: MediaWrapper?, id: Int, priority: Int) {
+    private fun buildRecommendation(mw: AbstractMediaWrapper?, id: Int, priority: Int) {
         if (mw == null) return
         // build the recommendation as a Notification object
         val notification = NotificationCompat.BigPictureStyle(
@@ -79,21 +77,21 @@ class RecommendationsService : IntentService("RecommendationService") {
         mNotificationManager.notify(id, notification)
     }
 
-    private fun buildPendingIntent(mw: MediaWrapper, id: Int): PendingIntent {
+    private fun buildPendingIntent(mw: AbstractMediaWrapper, id: Int): PendingIntent {
         val intent = Intent(this@RecommendationsService, VideoPlayerActivity::class.java)
-        intent.action = Constants.PLAY_FROM_VIDEOGRID
-        intent.putExtra(Constants.PLAY_EXTRA_ITEM_LOCATION, mw.uri)
-        intent.putExtra(Constants.PLAY_EXTRA_ITEM_TITLE, mw.title)
-        intent.putExtra(Constants.PLAY_EXTRA_FROM_START, false)
+        intent.action = PLAY_FROM_VIDEOGRID
+        intent.putExtra(PLAY_EXTRA_ITEM_LOCATION, mw.uri)
+        intent.putExtra(PLAY_EXTRA_ITEM_TITLE, mw.title)
+        intent.putExtra(PLAY_EXTRA_FROM_START, false)
         return PendingIntent.getActivity(this, id, intent, PendingIntent.FLAG_UPDATE_CURRENT)
     }
 
-    private fun doRecommendations() = launch (start = CoroutineStart.UNDISPATCHED) {
+    private fun doRecommendations() = launch {
         mNotificationManager.cancelAll()
-        val videoList = withContext(VLCIO) { VLCApplication.getMLInstance().recentVideos }
+        val videoList = withContext(Dispatchers.IO) { AbstractMedialibrary.getInstance().recentVideos }
         if (Util.isArrayEmpty(videoList)) return@launch
         for ((id, mediaWrapper) in videoList.withIndex()) {
-            buildRecommendation(mediaWrapper, id, Notification.PRIORITY_DEFAULT)
+            buildRecommendation(mediaWrapper, id, NotificationManagerCompat.IMPORTANCE_DEFAULT)
             if (id == MAX_RECOMMENDATIONS) break
         }
     }

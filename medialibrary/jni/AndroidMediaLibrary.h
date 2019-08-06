@@ -33,7 +33,7 @@ public:
     void start();
     bool addDevice(const std::string& uuid, const std::string& path, bool removable);
     std::vector<std::tuple<std::string, std::string, bool>> devices();
-    bool removeDevice(const std::string& uuid);
+    bool removeDevice(const std::string& uuid, const std::string& path);
     void banFolder(const std::string& path);
     void unbanFolder(const std::string& path);
     void discover(const std::string&);
@@ -48,6 +48,7 @@ public:
     void forceParserRetry();
     void forceRescan();
     bool increasePlayCount(int64_t mediaId);
+    void removeMediaFromHistory(int64_t mediaId);
     /* History */
     std::vector<medialibrary::MediaPtr> lastMediaPlayed();
     bool addToHistory( const std::string& mrl, const std::string& title );
@@ -55,42 +56,60 @@ public:
     bool clearHistory();
 
     medialibrary::SearchAggregate search(const std::string& query);
-    std::vector<medialibrary::MediaPtr> searchMedia(const std::string& query);
-    std::vector<medialibrary::PlaylistPtr> searchPlaylists(const std::string& query);
-    std::vector<medialibrary::AlbumPtr> searchAlbums(const std::string& query);
-    std::vector<medialibrary::GenrePtr> searchGenre(const std::string& query);
-    std::vector<medialibrary::ArtistPtr> searchArtists(const std::string& query);
+    medialibrary::Query<medialibrary::IMedia> searchMedia(const std::string& query, const medialibrary::QueryParameters* params = nullptr);
+    medialibrary::Query<medialibrary::IMedia> searchAudio(const std::string& query, const medialibrary::QueryParameters* params = nullptr);
+    medialibrary::Query<medialibrary::IMedia> searchVideo(const std::string& query, const medialibrary::QueryParameters* params = nullptr);
+    medialibrary::Query<medialibrary::IPlaylist> searchPlaylists(const std::string& query, const medialibrary::QueryParameters* params = nullptr);
+    medialibrary::Query<medialibrary::IAlbum> searchAlbums(const std::string& query, const medialibrary::QueryParameters* params = nullptr);
+    medialibrary::Query<medialibrary::IGenre> searchGenre(const std::string& query, const medialibrary::QueryParameters* params = nullptr);
+    medialibrary::Query<medialibrary::IArtist> searchArtists(const std::string& query, const medialibrary::QueryParameters* params = nullptr);
+    //Search from ML items
+    medialibrary::Query<medialibrary::IMedia> searchFromAlbum( int64_t albumId, const std::string& query, const medialibrary::QueryParameters* params = nullptr );
+    medialibrary::Query<medialibrary::IMedia> searchFromArtist( int64_t artistId, const std::string& query, const medialibrary::QueryParameters* params = nullptr );
+    medialibrary::Query<medialibrary::IAlbum> searchAlbumsFromArtist( int64_t artistId, const std::string& query, const medialibrary::QueryParameters* params = nullptr );
+    medialibrary::Query<medialibrary::IMedia> searchFromGenre( int64_t genreId, const std::string& query, const medialibrary::QueryParameters* params = nullptr );
+    medialibrary::Query<medialibrary::IAlbum> searchAlbumsFromGenre( int64_t genreId, const std::string& query, const medialibrary::QueryParameters* params = nullptr );
+    medialibrary::Query<medialibrary::IMedia> searchFromPLaylist( int64_t playlistId, const std::string& query, const medialibrary::QueryParameters* params = nullptr );
+    medialibrary::Query<medialibrary::IMedia> searchFromFolder( int64_t folderId, const std::string& query, medialibrary::IMedia::Type type, const medialibrary::QueryParameters* params = nullptr );
     medialibrary::MediaPtr media(long id);
     medialibrary::MediaPtr media(const std::string& mrl);
     medialibrary::MediaPtr addMedia(const std::string& mrl);
-    std::vector<medialibrary::MediaPtr> videoFiles( const medialibrary::QueryParameters* params = nullptr );
-    std::vector<medialibrary::MediaPtr> audioFiles( const medialibrary::QueryParameters* params = nullptr );
-    std::vector<medialibrary::AlbumPtr> albums(const medialibrary::QueryParameters* params);
+    bool removeExternalMedia(long id);
+    medialibrary::MediaPtr addStream(const std::string& mrl, const std::string& title);
+    medialibrary::Query<medialibrary::IMedia> videoFiles( const medialibrary::QueryParameters* params = nullptr );
+    medialibrary::Query<medialibrary::IMedia> audioFiles( const medialibrary::QueryParameters* params = nullptr );
+    medialibrary::Query<medialibrary::IAlbum> albums(const medialibrary::QueryParameters* params);
     medialibrary::AlbumPtr album(int64_t albumId);
-    std::vector<medialibrary::ArtistPtr> artists(bool includeAll, const medialibrary::QueryParameters* params);
+    medialibrary::Query<medialibrary::IArtist> artists(bool includeAll, const medialibrary::QueryParameters* params);
     medialibrary::ArtistPtr artist(int64_t artistId);
-    std::vector<medialibrary::GenrePtr> genres(const medialibrary::QueryParameters* params);
+    medialibrary::Query<medialibrary::IGenre> genres(const medialibrary::QueryParameters* params);
     medialibrary::GenrePtr genre(int64_t genreId);
-    std::vector<medialibrary::PlaylistPtr> playlists(const medialibrary::QueryParameters* params);
+    medialibrary::Query<medialibrary::IPlaylist> playlists(const medialibrary::QueryParameters* params);
     medialibrary::PlaylistPtr playlist( int64_t playlistId );
     medialibrary::PlaylistPtr PlaylistCreate( const std::string &name );
-    std::vector<medialibrary::MediaPtr> tracksFromAlbum( int64_t albumId, const medialibrary::QueryParameters* params );
-    std::vector<medialibrary::MediaPtr> mediaFromArtist( int64_t artistId, const medialibrary::QueryParameters* params );
-    std::vector<medialibrary::AlbumPtr> albumsFromArtist( int64_t artistId, const medialibrary::QueryParameters* params );
-    std::vector<medialibrary::MediaPtr> mediaFromGenre( int64_t genreId, const medialibrary::QueryParameters* params );
-    std::vector<medialibrary::AlbumPtr> albumsFromGenre( int64_t genreId, const medialibrary::QueryParameters* params );
-    std::vector<medialibrary::ArtistPtr> artistsFromGenre( int64_t genreId, const medialibrary::QueryParameters* params );
-    std::vector<medialibrary::MediaPtr> mediaFromPlaylist( int64_t playlistId );
+    medialibrary::Query<medialibrary::IMedia> tracksFromAlbum( int64_t albumId, const medialibrary::QueryParameters* params = nullptr );
+    medialibrary::Query<medialibrary::IMedia> mediaFromArtist( int64_t artistId, const medialibrary::QueryParameters* params = nullptr );
+    medialibrary::Query<medialibrary::IAlbum> albumsFromArtist( int64_t artistId, const medialibrary::QueryParameters* params = nullptr );
+    medialibrary::Query<medialibrary::IMedia> mediaFromGenre( int64_t genreId, bool withThumbnail, const medialibrary::QueryParameters* params = nullptr );
+    medialibrary::Query<medialibrary::IAlbum> albumsFromGenre( int64_t genreId, const medialibrary::QueryParameters* params = nullptr );
+    medialibrary::Query<medialibrary::IArtist> artistsFromGenre( int64_t genreId, const medialibrary::QueryParameters* params = nullptr );
+    medialibrary::Query<medialibrary::IMedia> mediaFromPlaylist( int64_t playlistId );
+    // Folders
+    medialibrary::Query<medialibrary::IMedia> mediaFromFolder(int64_t folderId, medialibrary::IMedia::Type type, const medialibrary::QueryParameters* params = nullptr );
+    medialibrary::Query<medialibrary::IFolder> folders(const medialibrary::QueryParameters* params = nullptr, medialibrary::IMedia::Type type = medialibrary::IMedia::Type::Unknown );
+    medialibrary::Query<medialibrary::IFolder> subFolders(int64_t folderId, const medialibrary::QueryParameters* params = nullptr );
+    //PLaylists
     bool playlistAppend(int64_t playlistId, int64_t mediaId);
     bool playlistAdd(int64_t playlistId, int64_t mediaId, unsigned int position);
-    bool playlistMove(int64_t playlistId, int64_t mediaId, unsigned int position);
-    bool playlistRemove(int64_t playlistId, int64_t mediaId);
+    bool playlistMove(int64_t playlistId, unsigned int oldPosition, unsigned int newPosition);
+    bool playlistRemove(int64_t playlistId, unsigned int position);
     bool PlaylistDelete( int64_t playlistId );
 
-    void requestThumbnail( int64_t media_id );
+    void requestThumbnail( int64_t media_id, medialibrary::ThumbnailSizeType sizeType, uint32_t desiredWidth,
+                           uint32_t desiredHeight, float position );
 
     void onMediaAdded( std::vector<medialibrary::MediaPtr> media );
-    void onMediaUpdated( std::vector<medialibrary::MediaPtr> media ) ;
+    void onMediaModified( std::vector<medialibrary::MediaPtr> media ) ;
     void onMediaDeleted( std::vector<int64_t> ids ) ;
 
     void onArtistsAdded( std::vector<medialibrary::ArtistPtr> artists ) ;
@@ -101,24 +120,28 @@ public:
     void onAlbumsModified( std::vector<medialibrary::AlbumPtr> albums );
     void onAlbumsDeleted( std::vector<int64_t> ids );
 
-    void onTracksAdded( std::vector<medialibrary::AlbumTrackPtr> tracks );
-    void onTracksDeleted( std::vector<int64_t> trackIds );
-
     void onPlaylistsAdded( std::vector<medialibrary::PlaylistPtr> playlists );
     void onPlaylistsModified( std::vector<medialibrary::PlaylistPtr> playlist );
     void onPlaylistsDeleted( std::vector<int64_t> ids );
 
+    void onGenresAdded( std::vector<medialibrary::GenrePtr> );
+    void onGenresModified( std::vector<medialibrary::GenrePtr> );
+    void onGenresDeleted( std::vector<int64_t> );
+
     void onDiscoveryStarted( const std::string& entryPoint );
     void onDiscoveryProgress( const std::string& entryPoint );
-    void onDiscoveryCompleted( const std::string& entryPoint );
+    void onDiscoveryCompleted( const std::string& entryPoint, bool success );
     void onReloadStarted( const std::string& entryPoint );
-    void onReloadCompleted( const std::string& entryPoint );
+    void onReloadCompleted( const std::string& entryPoint, bool success );
     void onEntryPointBanned( const std::string& entryPoint, bool success );
     void onEntryPointUnbanned( const std::string& entryPoint, bool success );
+    void onEntryPointAdded( const std::string& entryPoint, bool success );
     void onEntryPointRemoved( const std::string& entryPoint, bool success );
     void onParsingStatsUpdated( uint32_t percent);
     void onBackgroundTasksIdleChanged( bool isIdle );
-    void onMediaThumbnailReady( medialibrary::MediaPtr media, bool success );
+    void onMediaThumbnailReady(medialibrary::MediaPtr media, medialibrary::ThumbnailSizeType sizeType,
+                               bool success );
+    void onHistoryChanged( medialibrary::HistoryType historyType );
 
 private:
     void jni_detach_thread(void *data);

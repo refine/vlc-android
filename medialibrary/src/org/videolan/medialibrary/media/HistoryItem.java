@@ -5,6 +5,9 @@ import android.net.Uri;
 import android.os.Parcel;
 import android.os.Parcelable;
 
+import org.videolan.medialibrary.MLServiceLocator;
+import org.videolan.medialibrary.interfaces.media.AbstractMediaWrapper;
+
 import java.util.Date;
 
 public class HistoryItem extends MediaLibraryItem {
@@ -19,15 +22,20 @@ public class HistoryItem extends MediaLibraryItem {
         this.insertionDate = insertionDate;
     }
 
-    public MediaWrapper getMedia() {
-        MediaWrapper mw = new MediaWrapper(Uri.parse(mrl));
+    public AbstractMediaWrapper getMedia() {
+        AbstractMediaWrapper mw = MLServiceLocator.getAbstractMediaWrapper(Uri.parse(mrl));
         mw.setTitle(title);
-        mw.setType(MediaWrapper.TYPE_STREAM);
+        mw.setType(AbstractMediaWrapper.TYPE_STREAM);
         return mw;
     }
     @Override
-    public MediaWrapper[] getTracks() {
-        return new MediaWrapper[]{getMedia()};
+    public AbstractMediaWrapper[] getTracks() {
+        return new AbstractMediaWrapper[]{getMedia()};
+    }
+
+    @Override
+    public int getTracksCount() {
+        return 1;
     }
 
     @Override
@@ -39,6 +47,7 @@ public class HistoryItem extends MediaLibraryItem {
         return mrl;
     }
 
+    @Override
     public String getTitle() {
         return title;
     }
@@ -65,10 +74,12 @@ public class HistoryItem extends MediaLibraryItem {
 
     public static Parcelable.Creator<HistoryItem> CREATOR
             = new Parcelable.Creator<HistoryItem>() {
+        @Override
         public HistoryItem createFromParcel(Parcel in) {
             return new HistoryItem(in);
         }
 
+        @Override
         public HistoryItem[] newArray(int size) {
             return new HistoryItem[size];
         }

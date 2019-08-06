@@ -25,23 +25,26 @@ package org.videolan.vlc.gui.helpers.hf
 
 import android.Manifest
 import android.annotation.TargetApi
-import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.support.v4.app.Fragment
-import android.support.v4.app.FragmentActivity
+import androidx.fragment.app.Fragment
+import androidx.fragment.app.FragmentActivity
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.videolan.libvlc.util.AndroidUtil
 import org.videolan.vlc.startMedialibrary
-import org.videolan.vlc.util.Constants
-import org.videolan.vlc.util.Permissions
+import org.videolan.vlc.util.*
 import org.videolan.vlc.util.Permissions.canReadStorage
+import videolan.org.commontools.LiveEvent
 
 @TargetApi(Build.VERSION_CODES.LOLLIPOP)
 class StoragePermissionsDelegate : BaseHeadlessFragment() {
 
-    private var mFirstRun: Boolean = false
-    private var mUpgrade: Boolean = false
-    private var mWrite: Boolean = false
+    private var firstRun: Boolean = false
+    private var upgrade: Boolean = false
+    private var write: Boolean = false
 
     interface CustomActionController {
         fun onStorageAccessGranted()
@@ -49,68 +52,101 @@ class StoragePermissionsDelegate : BaseHeadlessFragment() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val intent = if (mActivity == null) null else mActivity!!.intent
-        if (intent !== null && intent.getBooleanExtra(Constants.EXTRA_UPGRADE, false)) {
-            mUpgrade = true
-            mFirstRun = intent.getBooleanExtra(Constants.EXTRA_FIRST_RUN, false)
-            intent.removeExtra(Constants.EXTRA_UPGRADE)
-            intent.removeExtra(Constants.EXTRA_FIRST_RUN)
+        val intent = activity?.intent
+        if (intent !== null && intent.getBooleanExtra(EXTRA_UPGRADE, false)) {
+            upgrade = true
+            firstRun = intent.getBooleanExtra(EXTRA_FIRST_RUN, false)
         }
-        mWrite = arguments?.getBoolean("write") ?: false
-        if (AndroidUtil.isMarshMallowOrLater && !canReadStorage(activity!!)) {
+        write = arguments?.getBoolean("write") ?: false
+        if (AndroidUtil.isMarshMallowOrLater && !canReadStorage(requireContext())) {
             if (shouldShowRequestPermissionRationale(Manifest.permission.READ_EXTERNAL_STORAGE))
-                Permissions.showStoragePermissionDialog(mActivity, false)
+                Permissions.showStoragePermissionDialog(requireActivity(), false)
             else
                 requestStorageAccess(false)
-        } else if (mWrite) {
-            if (shouldShowRequestPermissionRationale(Manifest.permission.READ_EXTERNAL_STORAGE))
-                Permissions.showStoragePermissionDialog(mActivity, false)
+        } else if (write) {
+            if (shouldShowRequestPermissionRationale(Manifest.permission.WRITE_EXTERNAL_STORAGE))
+                Permissions.showStoragePermissionDialog(requireActivity(), false)
             else
                 requestStorageAccess(true)
         }
     }
 
     private fun requestStorageAccess(write: Boolean) {
-        requestPermissions(arrayOf(if (write) Manifest.permission.WRITE_EXTERNAL_STORAGE else Manifest.permission.READ_EXTERNAL_STORAGE),
-                if (write) Permissions.PERMISSION_WRITE_STORAGE_TAG else Permissions.PERMISSION_STORAGE_TAG)
+        val code = if (write) Manifest.permission.WRITE_EXTERNAL_STORAGE else Manifest.permission.READ_EXTERNAL_STORAGE
+        val tag = if (write) Permissions.PERMISSION_WRITE_STORAGE_TAG else Permissions.PERMISSION_STORAGE_TAG
+        requestPermissions(arrayOf(code), tag)
     }
 
-    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>, grantResults: IntArray) {
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>, grantResults: PermissionResults) {
         when (requestCode) {
             Permissions.PERMISSION_STORAGE_TAG -> {
                 // If request is cancelled, the result arrays are empty.
                 val ctx = activity ?: return
-                if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                    if (ctx is CustomActionController) ctx.onStorageAccessGranted()
-                    else ctx.startMedialibrary(mFirstRun, mUpgrade, true)
+                if (grantResults.granted()) {
+                    storageAccessGranted.value = true
+                    deferredGrant.complete(true)
                     exit()
-                } else if (mActivity != null) {
-                    Permissions.showStoragePermissionDialog(mActivity, false)
-                    if (!shouldShowRequestPermissionRationale(Manifest.permission.READ_EXTERNAL_STORAGE))
-                        exit()
+                    return
+                } else {
+                    if (shouldShowRequestPermissionRationale(Manifest.permission.READ_EXTERNAL_STORAGE)) {
+                        Permissions.showStoragePermissionDialog(ctx, false)
+                        return
+                    }
                 }
+                storageAccessGranted.value = false
+                deferredGrant.complete(false)
+                exit()
             }
-            Permissions.PERMISSION_WRITE_STORAGE_TAG -> executeCallback()
+            Permissions.PERMISSION_WRITE_STORAGE_TAG -> {
+                deferredGrant.complete(grantResults.granted())
+                exit()
+            }
         }
     }
 
     companion object {
 
         const val TAG = "VLC/StorageHF"
+        val storageAccessGranted = LiveEvent<Boolean>()
 
         fun askStoragePermission(activity: FragmentActivity, write: Boolean, cb: Runnable?) {
-            if (activity.isFinishing) return
+            val intent = activity.intent
+            val upgrade = intent?.getBooleanExtra(EXTRA_UPGRADE, false) ?: false
+            val firstRun = upgrade && intent.getBooleanExtra(EXTRA_FIRST_RUN, false)
+            AppScope.launch {
+                if (getStoragePermission(activity, write)) (cb ?: getAction(activity, firstRun, upgrade)).run()
+            }
+        }
+
+        suspend fun getStoragePermission(activity: FragmentActivity, write: Boolean) : Boolean{
+            if (activity.isFinishing) return false
             val fm = activity.supportFragmentManager
             var fragment: Fragment? = fm.findFragmentByTag(TAG)
-            callback = cb
             if (fragment == null) {
                 val args = Bundle()
                 args.putBoolean("write", write)
                 fragment = StoragePermissionsDelegate()
                 fragment.arguments = args
                 fm.beginTransaction().add(fragment, TAG).commitAllowingStateLoss()
-            } else
+            } else {
                 (fragment as StoragePermissionsDelegate).requestStorageAccess(write)
+                return false //Fragment is already waiting for answear
+            }
+            return fragment.awaitGrant()
         }
+
+        private fun getAction(activity: FragmentActivity, firstRun: Boolean, upgrade: Boolean) = Runnable {
+            if (activity is CustomActionController) activity.onStorageAccessGranted()
+            else {
+                activity.startMedialibrary(firstRun, upgrade, true)
+            }
+        }
+
+        suspend fun FragmentActivity.getWritePermission(uri: Uri) = if (uri.path?.startsWith(AndroidDevices.EXTERNAL_PUBLIC_DIRECTORY) == true) {
+            if (AndroidUtil.isOOrLater && !Permissions.canWriteStorage()) getStoragePermission(this, true)
+            else withContext(Dispatchers.IO) { FileUtils.canWrite(uri) }
+        } else getExtWritePermission(uri)
+
+        suspend fun Fragment.getWritePermission(uri: Uri) = activity?.getWritePermission(uri) ?: false
     }
 }

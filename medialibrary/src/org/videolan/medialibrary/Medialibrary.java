@@ -1,100 +1,50 @@
+/*
+ *****************************************************************************
+ * Medialibrary.java
+ *****************************************************************************
+ * Copyright © 2017-2018 VLC authors and VideoLAN
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston MA 02110-1301, USA.
+ *****************************************************************************/
+
 package org.videolan.medialibrary;
 
-import android.Manifest;
-import android.arch.lifecycle.LiveData;
-import android.arch.lifecycle.MutableLiveData;
 import android.content.Context;
-import android.content.Intent;
-import android.content.pm.PackageManager;
 import android.net.Uri;
-import android.os.Build;
-import android.os.Environment;
-import android.support.annotation.NonNull;
-import android.support.annotation.Nullable;
-import android.support.annotation.WorkerThread;
-import android.support.v4.content.ContextCompat;
-import android.support.v4.content.LocalBroadcastManager;
 import android.text.TextUtils;
 import android.util.Log;
 
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
+import androidx.annotation.WorkerThread;
+
 import org.videolan.libvlc.LibVLC;
-import org.videolan.medialibrary.interfaces.DevicesDiscoveryCb;
-import org.videolan.medialibrary.interfaces.EntryPointsEventsCb;
-import org.videolan.medialibrary.interfaces.MediaAddedCb;
-import org.videolan.medialibrary.interfaces.MediaUpdatedCb;
-import org.videolan.medialibrary.media.Album;
-import org.videolan.medialibrary.media.Artist;
-import org.videolan.medialibrary.media.Genre;
-import org.videolan.medialibrary.media.HistoryItem;
-import org.videolan.medialibrary.media.MediaSearchAggregate;
-import org.videolan.medialibrary.media.MediaWrapper;
-import org.videolan.medialibrary.media.Playlist;
+import org.videolan.medialibrary.interfaces.AbstractMedialibrary;
+import org.videolan.medialibrary.interfaces.media.AbstractAlbum;
+import org.videolan.medialibrary.interfaces.media.AbstractArtist;
+import org.videolan.medialibrary.interfaces.media.AbstractFolder;
+import org.videolan.medialibrary.interfaces.media.AbstractGenre;
+import org.videolan.medialibrary.interfaces.media.AbstractMediaWrapper;
+import org.videolan.medialibrary.interfaces.media.AbstractPlaylist;
 import org.videolan.medialibrary.media.SearchAggregate;
 
 import java.io.File;
-import java.lang.ref.WeakReference;
-import java.util.ArrayList;
-import java.util.List;
 
-import videolan.org.commontools.LiveEvent;
-
-public class Medialibrary {
+public class Medialibrary extends AbstractMedialibrary {
     private static final String TAG = "VLC/JMedialibrary";
 
-    // Sorting
-    public final static int SORT_DEFAULT = 0;
-    public final static int SORT_ALPHA = 1;
-    public final static int SORT_DURATION = 2;
-    public final static int SORT_INSERTIONDATE = 3;
-    public final static int SORT_LASTMODIFICATIONDATE = 4;
-    public final static int SORT_RELEASEDATE = 5;
-    public final static int SORT_FILESIZE = 6;
-    public final static int SORT_ARTIST = 7;
-    public final static int SORT_PLAYCOUNT = 8;
-    public final static int SORT_ALBUM = 9;
-    public final static int SORT_FILENAME = 10;
-
-    public static final int FLAG_MEDIA_UPDATED_AUDIO        = 1 << 0;
-    public static final int FLAG_MEDIA_UPDATED_AUDIO_EMPTY  = 1 << 1;
-    public static final int FLAG_MEDIA_UPDATED_VIDEO        = 1 << 2;
-    public static final int FLAG_MEDIA_ADDED_AUDIO          = 1 << 3;
-    public static final int FLAG_MEDIA_ADDED_AUDIO_EMPTY    = 1 << 4;
-    public static final int FLAG_MEDIA_ADDED_VIDEO          = 1 << 5;
-
-    public static final int ML_INIT_SUCCESS = 0;
-    public static final int ML_INIT_ALREADY_INITIALIZED = 1;
-    public static final int ML_INIT_FAILED = 2;
-    public static final int ML_INIT_DB_RESET = 3;
-
-    public static final String ACTION_IDLE = "action_idle";
-    public static final String STATE_IDLE = "state_idle";
-
-    public static final MediaWrapper[] EMPTY_COLLECTION = {};
-    public static final String VLC_MEDIA_DB_NAME = "/vlc_media.db";
-    public static final String THUMBS_FOLDER_NAME = "/thumbs";
-
-
-    private long mInstanceID;
-    private volatile boolean mIsInitiated = false;
-    private volatile boolean mIsWorking = false;
-
-    private MediaUpdatedCb mediaUpdatedCb = null;
-    private MediaAddedCb mediaAddedCb = null;
-    private ArtistsAddedCb mArtistsAddedCb = null;
-    private ArtistsModifiedCb mArtistsModifiedCb = null;
-    private AlbumsAddedCb mAlbumsAddedCb = null;
-    private AlbumsModifiedCb mAlbumsModifiedCb = null;
-    private final List<OnMedialibraryReadyListener> onMedialibraryReadyListeners = new ArrayList<>();
-    private volatile boolean isMedialibraryStarted = false;
-    private final List<DevicesDiscoveryCb> devicesDiscoveryCbList = new ArrayList<>();
-    private final List<EntryPointsEventsCb> entryPointsEventsCbList = new ArrayList<>();
-    private static Context sContext;
-
-    private static final Medialibrary instance = new Medialibrary();
-
-    public static Context getContext() {
-        return sContext;
-    }
 
     public int init(Context context) {
         if (context == null) return ML_INIT_FAILED;
@@ -105,6 +55,14 @@ public class Medialibrary {
                 || dbDirectory == null || !dbDirectory.canWrite())
             return ML_INIT_FAILED;
         LibVLC.loadLibraries();
+        try {
+            System.loadLibrary("c++_shared");
+            System.loadLibrary("mla");
+        } catch (UnsatisfiedLinkError ule)
+        {
+            Log.e(TAG, "Can't load mla: " + ule);
+            return ML_INIT_FAILED;
+        }
         int initCode = nativeInit(dbDirectory+ VLC_MEDIA_DB_NAME, extFilesDir+ THUMBS_FOLDER_NAME);
         mIsInitiated = initCode != ML_INIT_FAILED;
         return initCode;
@@ -116,12 +74,8 @@ public class Medialibrary {
         synchronized (onMedialibraryReadyListeners) {
             for (OnMedialibraryReadyListener listener : onMedialibraryReadyListeners) listener.onMedialibraryReady();
         }
-        nativeSetMediaAddedCbFlag(FLAG_MEDIA_ADDED_AUDIO|FLAG_MEDIA_ADDED_VIDEO);
-        nativeSetMediaUpdatedCbFlag(FLAG_MEDIA_UPDATED_AUDIO|FLAG_MEDIA_UPDATED_VIDEO);
-    }
-
-    public boolean isStarted() {
-        return isMedialibraryStarted;
+        nativeSetMediaAddedCbFlag(FLAG_MEDIA_ADDED_AUDIO_EMPTY|FLAG_MEDIA_ADDED_VIDEO_EMPTY);
+        nativeSetMediaUpdatedCbFlag(FLAG_MEDIA_UPDATED_AUDIO_EMPTY|FLAG_MEDIA_UPDATED_VIDEO_EMPTY);
     }
 
     public void banFolder(@NonNull String path) {
@@ -139,7 +93,12 @@ public class Medialibrary {
     }
 
     public boolean addDevice(@NonNull String uuid, @NonNull String path, boolean removable) {
-        return nativeAddDevice(Tools.encodeVLCMrl(uuid), Tools.encodeVLCMrl(path), removable);
+        if (!mIsInitiated) return false;
+        final boolean added = nativeAddDevice(Tools.encodeVLCString(uuid), Tools.encodeVLCMrl(path), removable);
+        synchronized (onDeviceChangeListeners) {
+            for (OnDeviceChangeListener listener : onDeviceChangeListeners) listener.onDeviceChange();
+        }
+        return added;
     }
 
     public void discover(@NonNull String path) {
@@ -157,55 +116,63 @@ public class Medialibrary {
     }
 
     public String[] getFoldersList() {
-        if (!mIsInitiated)
-            return new String[0];
+        if (!mIsInitiated) return new String[0];
         return nativeEntryPoints();
     }
 
-    public boolean removeDevice(String uuid) {
-        return mIsInitiated && !TextUtils.isEmpty(uuid) && nativeRemoveDevice(Tools.encodeVLCMrl(uuid));
+    public boolean removeDevice(String uuid, String path) {
+        if (!mIsInitiated) return false;
+        final boolean removed = !TextUtils.isEmpty(uuid) && !TextUtils.isEmpty(path) && nativeRemoveDevice(Tools.encodeVLCString(uuid), Tools.encodeVLCMrl(path));
+        synchronized (onDeviceChangeListeners) {
+            for (OnDeviceChangeListener listener : onDeviceChangeListeners) listener.onDeviceChange();
+        }
+        return removed;
     }
 
     @Override
     protected void finalize() throws Throwable {
-        if (mIsInitiated)
-            nativeRelease();
+        if (mIsInitiated) nativeRelease();
         super.finalize();
     }
 
-    @NonNull
-    public static Medialibrary getInstance() {
-        return instance;
+    @WorkerThread
+    public AbstractMediaWrapper[] getVideos() {
+        return mIsInitiated ? nativeGetVideos() : new AbstractMediaWrapper[0];
     }
 
     @WorkerThread
-    public MediaWrapper[] getVideos() {
-        return mIsInitiated ? nativeGetVideos() : new MediaWrapper[0];
+    public AbstractMediaWrapper[] getPagedVideos(int sort, boolean desc, int nbItems, int offset) {
+        return mIsInitiated ? nativeGetSortedPagedVideos(sort, desc, nbItems, offset) : new AbstractMediaWrapper[0];
     }
 
     @WorkerThread
-    public MediaWrapper[] getVideos(int sort, boolean desc) {
-        return mIsInitiated ? nativeGetSortedVideos(sort, desc) : new MediaWrapper[0];
+    public AbstractMediaWrapper[] getVideos(int sort, boolean desc) {
+        return mIsInitiated ? nativeGetSortedVideos(sort, desc) : new AbstractMediaWrapper[0];
     }
 
     @WorkerThread
-    public MediaWrapper[] getRecentVideos() {
-        return mIsInitiated ? nativeGetRecentVideos() : new MediaWrapper[0];
+    public AbstractMediaWrapper[] getRecentVideos() {
+        return mIsInitiated ? nativeGetRecentVideos() : new AbstractMediaWrapper[0];
     }
 
     @WorkerThread
-    public MediaWrapper[] getAudio() {
-        return mIsInitiated ? nativeGetAudio() : new MediaWrapper[0];
+    public AbstractMediaWrapper[] getAudio() {
+        return mIsInitiated ? nativeGetAudio() : new AbstractMediaWrapper[0];
     }
 
     @WorkerThread
-    public MediaWrapper[] getAudio(int sort, boolean desc) {
-        return mIsInitiated ? nativeGetSortedAudio(sort, desc) : new MediaWrapper[0];
+    public AbstractMediaWrapper[] getAudio(int sort, boolean desc) {
+        return mIsInitiated ? nativeGetSortedAudio(sort, desc) : new AbstractMediaWrapper[0];
     }
 
     @WorkerThread
-    public MediaWrapper[] getRecentAudio() {
-        return mIsInitiated ? nativeGetRecentAudio() : new MediaWrapper[0];
+    public AbstractMediaWrapper[] getPagedAudio(int sort, boolean desc, int nbItems, int offset) {
+        return mIsInitiated ? nativeGetSortedPagedAudio(sort, desc, nbItems, offset) : new AbstractMediaWrapper[0];
+    }
+
+    @WorkerThread
+    public AbstractMediaWrapper[] getRecentAudio() {
+        return mIsInitiated ? nativeGetRecentAudio() : new AbstractMediaWrapper[0];
     }
 
     public int getVideoCount() {
@@ -218,78 +185,130 @@ public class Medialibrary {
 
 
     @WorkerThread
-    public Album[] getAlbums() {
-        return getAlbums(Medialibrary.SORT_DEFAULT, false);
+    public AbstractAlbum[] getAlbums() {
+        return getAlbums(AbstractMedialibrary.SORT_DEFAULT, false);
     }
 
     @WorkerThread
-    public Album[] getAlbums(int sort, boolean desc) {
-        return mIsInitiated ? nativeGetAlbums(sort, desc) : new Album[0];
+    public AbstractAlbum[] getAlbums(int sort, boolean desc) {
+        return mIsInitiated ? nativeGetAlbums(sort, desc) : new AbstractAlbum[0];
+    }
+
+    @NonNull
+    @WorkerThread
+    public AbstractAlbum[] getPagedAlbums(int sort, boolean desc, int nbItems, int offset) {
+        return mIsInitiated ? nativeGetPagedAlbums(sort, desc, nbItems, offset) : new AbstractAlbum[0];
+    }
+
+    public int getAlbumsCount() {
+        return mIsInitiated ? nativeGetAlbumsCount() : 0;
+    }
+
+    public int getAlbumsCount(String query) {
+        return mIsInitiated ? nativeGetAlbumSearchCount(query) : 0;
     }
 
     @WorkerThread
-    public Album getAlbum(long albumId) {
+    public AbstractAlbum getAlbum(long albumId) {
         return mIsInitiated ? nativeGetAlbum(albumId) : null;
     }
 
     @WorkerThread
-    public Artist[] getArtists(boolean all) {
-        return getArtists(all, Medialibrary.SORT_DEFAULT, false);
+    public AbstractArtist[] getArtists(boolean all) {
+        return getArtists(all, AbstractMedialibrary.SORT_DEFAULT, false);
     }
 
     @WorkerThread
-    public Artist[] getArtists(boolean all, int sort, boolean desc) {
-        return mIsInitiated ? nativeGetArtists(all, sort, desc) : new Artist[0];
+    public AbstractArtist[] getArtists(boolean all, int sort, boolean desc) {
+        return mIsInitiated ? nativeGetArtists(all, sort, desc) : new AbstractArtist[0];
     }
 
-    public Artist getArtist(long artistId) {
+    @WorkerThread
+    public AbstractArtist[] getPagedArtists(boolean all, int sort, boolean desc, int nbItems, int offset) {
+        return mIsInitiated ? nativeGetPagedArtists(all, sort, desc, nbItems, offset) : new AbstractArtist[0];
+    }
+
+    public int getArtistsCount(boolean all) {
+        return mIsInitiated ? nativeGetArtistsCount(all) : 0;
+    }
+
+    public int getArtistsCount(String query) {
+        return mIsInitiated ? nativeGetArtistsSearchCount(query) : 0;
+    }
+
+    public AbstractArtist getArtist(long artistId) {
         return mIsInitiated ? nativeGetArtist(artistId) : null;
     }
 
     @WorkerThread
-    public Genre[] getGenres() {
-        return getGenres(Medialibrary.SORT_DEFAULT, false);
+    public AbstractGenre[] getGenres() {
+        return getGenres(AbstractMedialibrary.SORT_DEFAULT, false);
     }
 
     @WorkerThread
-    public Genre[] getGenres(int sort, boolean desc) {
-        return mIsInitiated ? nativeGetGenres(sort, desc) : new Genre[0];
+    public AbstractGenre[] getGenres(int sort, boolean desc) {
+        return mIsInitiated ? nativeGetGenres(sort, desc) : new AbstractGenre[0];
     }
 
-    public Genre getGenre(long genreId) {
+    @NonNull
+    @WorkerThread
+    public AbstractGenre[] getPagedGenres(int sort, boolean desc, int nbItems, int offset) {
+        return mIsInitiated ? nativeGetPagedGenres(sort, desc, nbItems, offset) : new AbstractGenre[0];
+    }
+
+    public int getGenresCount() {
+        return mIsInitiated ? nativeGetGenresCount() : 0;
+    }
+
+    public int getGenresCount(String query) {
+        return mIsInitiated ? nativeGetGenreSearchCount(query) : 0;
+    }
+
+    public AbstractGenre getGenre(long genreId) {
         return mIsInitiated ? nativeGetGenre(genreId) : null;
     }
 
     @WorkerThread
-    public Playlist[] getPlaylists() {
-        return getPlaylists(Medialibrary.SORT_DEFAULT, false);
+    public AbstractPlaylist[] getPlaylists() {
+        return getPlaylists(AbstractMedialibrary.SORT_DEFAULT, false);
     }
 
     @WorkerThread
-    public Playlist[] getPlaylists(int sort, boolean desc) {
-        return mIsInitiated ? nativeGetPlaylists(sort, desc) : new Playlist[0];
+    public AbstractPlaylist[] getPlaylists(int sort, boolean desc) {
+        return mIsInitiated ? nativeGetPlaylists(sort, desc) : new AbstractPlaylist[0];
     }
 
-    public Playlist getPlaylist(long playlistId) {
+    @WorkerThread
+    public AbstractPlaylist[] getPagedPlaylists(int sort, boolean desc, int nbItems, int offset) {
+        return mIsInitiated ? nativeGetPagedPlaylists(sort, desc, nbItems, offset) : new AbstractPlaylist[0];
+    }
+
+    public int getPlaylistsCount() {
+        return mIsInitiated ? nativeGetPlaylistsCount() : 0;
+    }
+
+    public int getPlaylistsCount(String query) {
+        return mIsInitiated ? nativeGetPlaylistSearchCount(query) : 0;
+    }
+
+    public AbstractPlaylist getPlaylist(long playlistId) {
         return mIsInitiated ? nativeGetPlaylist(playlistId) : null;
     }
 
-    public Playlist createPlaylist(String name) {
+    public AbstractPlaylist createPlaylist(String name) {
         return mIsInitiated && !TextUtils.isEmpty(name) ? nativePlaylistCreate(name) : null;
     }
 
     public void pauseBackgroundOperations() {
-        if (mIsInitiated)
-            nativePauseBackgroundOperations();
+        if (mIsInitiated) nativePauseBackgroundOperations();
     }
 
     public void resumeBackgroundOperations() {
-        if (mIsInitiated)
-            nativeResumeBackgroundOperations();
+        if (mIsInitiated) nativeResumeBackgroundOperations();
     }
 
     public void reload() {
-        if (mIsInitiated && !isWorking()) nativeReload();
+        if (mIsInitiated) nativeReload();
     }
 
     public void reload(String entryPoint) {
@@ -306,13 +325,13 @@ public class Medialibrary {
     }
 
     @WorkerThread
-    public MediaWrapper[] lastMediaPlayed() {
+    public AbstractMediaWrapper[] lastMediaPlayed() {
         return mIsInitiated ? nativeLastMediaPlayed() : EMPTY_COLLECTION;
     }
 
     @WorkerThread
-    public HistoryItem[] lastStreamsPlayed() {
-        return mIsInitiated ? nativeLastStreamsPlayed() : new HistoryItem[0];
+    public AbstractMediaWrapper[] lastStreamsPlayed() {
+        return mIsInitiated ? nativeLastStreamsPlayed() : EMPTY_COLLECTION;
     }
 
     public boolean clearHistory() {
@@ -324,42 +343,50 @@ public class Medialibrary {
     }
 
     @Nullable
-    public MediaWrapper getMedia(long id) {
+    public AbstractMediaWrapper getMedia(long id) {
         return mIsInitiated ? nativeGetMedia(id) : null;
     }
 
     @Nullable
-    public MediaWrapper getMedia(Uri uri) {
+    public AbstractMediaWrapper getMedia(Uri uri) {
+        if ("content".equals(uri.getScheme())) return null;
         final String vlcMrl = Tools.encodeVLCMrl(uri.toString());
         return mIsInitiated && !TextUtils.isEmpty(vlcMrl) ? nativeGetMediaFromMrl(vlcMrl) : null;
     }
 
     @Nullable
-    public MediaWrapper getMedia(String mrl) {
+    public AbstractMediaWrapper getMedia(String mrl) {
+        if (mrl != null && mrl.startsWith("content:")) return null;
         final String vlcMrl = Tools.encodeVLCMrl(mrl);
         return mIsInitiated && !TextUtils.isEmpty(vlcMrl) ? nativeGetMediaFromMrl(vlcMrl) : null;
     }
 
     @Nullable
-    public MediaWrapper addMedia(String mrl) {
+    public AbstractMediaWrapper addMedia(String mrl) {
         final String vlcMrl = Tools.encodeVLCMrl(mrl);
         return mIsInitiated && !TextUtils.isEmpty(vlcMrl) ? nativeAddMedia(vlcMrl) : null;
     }
 
-    public void requestThumbnail(long id) {
-        if (mIsInitiated) nativeRequestThumbnail(id);
+    public boolean removeExternalMedia(long id) {
+        return mIsInitiated && nativeRemoveExternalMedia(id);
     }
 
-    public long getId() {
-        return mInstanceID;
+    @Nullable
+    public AbstractMediaWrapper addStream(String mrl, String title) {
+        final String vlcMrl = Tools.encodeVLCMrl(mrl);
+        final String vlcTitle = Tools.encodeVLCMrl(title);
+        return mIsInitiated && !TextUtils.isEmpty(vlcMrl) ? nativeAddStream(vlcMrl, vlcTitle) : null;
     }
 
-    public boolean isWorking() {
-        return mIsWorking;
+    @NonNull
+    @WorkerThread
+    public AbstractFolder[] getFolders(int type, int sort, boolean desc, int nbItems, int offset) {
+        return mIsInitiated ? nativeGetFolders(type, sort, desc, nbItems, offset) : new AbstractFolder[0];
     }
 
-    public boolean isInitiated() {
-        return mIsInitiated;
+    @WorkerThread
+    public int getFoldersCount(int type) {
+        return mIsInitiated ? nativeGetFoldersCount(type) : 0;
     }
 
     public boolean increasePlayCount(long mediaId) {
@@ -367,331 +394,89 @@ public class Medialibrary {
     }
 
     // If media is not in ML, find it with its path
-    public MediaWrapper findMedia(MediaWrapper mw) {
+    public AbstractMediaWrapper findMedia(AbstractMediaWrapper mw) {
         if (mIsInitiated && mw != null && mw.getId() == 0L) {
-            Uri uri = mw.getUri();
-            MediaWrapper libraryMedia = getMedia(uri);
-            if (libraryMedia == null && TextUtils.equals("file", uri.getScheme()) &&
-                    uri.getPath() != null && uri.getPath().startsWith("/sdcard")) {
-                uri = Tools.convertLocalUri(uri);
-                libraryMedia = getMedia(uri);
-            }
-            if (libraryMedia != null)
+            final Uri uri = mw.getUri();
+            final AbstractMediaWrapper libraryMedia = getMedia(uri);
+            if (libraryMedia != null) {
+                libraryMedia.addFlags(mw.getFlags());
                 return libraryMedia;
+            }
+            if (TextUtils.equals("file", uri.getScheme()) &&
+                    uri.getPath() != null && uri.getPath().startsWith("/sdcard")) {
+                final AbstractMediaWrapper alternateMedia = getMedia(Tools.convertLocalUri(uri));
+                if (alternateMedia != null) {
+                    alternateMedia.addFlags(mw.getFlags());
+                    return alternateMedia;
+                }
+            }
         }
         return mw;
-    }
-
-    @SuppressWarnings("unused")
-    public void onMediaAdded(MediaWrapper[] mediaList) {
-        if (mediaAddedCb != null)
-            mediaAddedCb.onMediaAdded(mediaList);
-    }
-
-    @SuppressWarnings("unused")
-    public void onMediaUpdated(MediaWrapper[] mediaList) {
-        if (mediaUpdatedCb != null)
-            mediaUpdatedCb.onMediaUpdated(mediaList);
-    }
-
-    @SuppressWarnings("unused")
-    public void onMediaDeleted(long[] ids) {
-        for (long id : ids)
-            Log.d(TAG, "onMediaDeleted: "+id);
-    }
-
-    @SuppressWarnings("unused")
-    public void onArtistsAdded() {
-        if (mArtistsAddedCb != null) mArtistsAddedCb.onArtistsAdded();
-    }
-
-    @SuppressWarnings("unused")
-    public void onArtistsModified() {
-        if (mArtistsModifiedCb != null)
-            mArtistsModifiedCb.onArtistsModified();
-    }
-
-    @SuppressWarnings("unused")
-    public void onAlbumsAdded() {
-        if (mAlbumsAddedCb != null)
-            mAlbumsAddedCb.onAlbumsAdded();
-    }
-
-    @SuppressWarnings("unused")
-    public void onAlbumsModified() {
-        if (mAlbumsModifiedCb != null)
-            mAlbumsModifiedCb.onAlbumsModified();
-    }
-
-    @SuppressWarnings("unused")
-    public void onArtistsDeleted(long[] ids) {
-        for (long id : ids)
-            Log.d(TAG, "onArtistsDeleted: "+id);
-    }
-
-    @SuppressWarnings("unused")
-    public void onAlbumsDeleted(long[] ids) {
-        for (long id : ids)
-            Log.d(TAG, "onAlbumsDeleted: "+id);
-    }
-
-    public void onDiscoveryStarted(String entryPoint) {
-        synchronized (devicesDiscoveryCbList) {
-            if (!devicesDiscoveryCbList.isEmpty())
-                for (DevicesDiscoveryCb cb : devicesDiscoveryCbList)
-                    cb.onDiscoveryStarted(entryPoint);
-        }
-        synchronized (entryPointsEventsCbList) {
-            if (!entryPointsEventsCbList.isEmpty())
-                for (EntryPointsEventsCb cb : entryPointsEventsCbList)
-                    cb.onDiscoveryStarted(entryPoint);
-        }
-    }
-
-    public void onDiscoveryProgress(String entryPoint) {
-        synchronized (devicesDiscoveryCbList) {
-            if (!devicesDiscoveryCbList.isEmpty())
-                for (DevicesDiscoveryCb cb : devicesDiscoveryCbList)
-                    cb.onDiscoveryProgress(entryPoint);
-        }
-        synchronized (entryPointsEventsCbList) {
-            if (!entryPointsEventsCbList.isEmpty())
-                for (EntryPointsEventsCb cb : entryPointsEventsCbList)
-                    cb.onDiscoveryProgress(entryPoint);
-        }
-    }
-
-    public void onDiscoveryCompleted(String entryPoint) {
-        synchronized (devicesDiscoveryCbList) {
-            if (!devicesDiscoveryCbList.isEmpty())
-                for (DevicesDiscoveryCb cb : devicesDiscoveryCbList)
-                    cb.onDiscoveryCompleted(entryPoint);
-        }
-        synchronized (entryPointsEventsCbList) {
-            if (!entryPointsEventsCbList.isEmpty())
-                for (EntryPointsEventsCb cb : entryPointsEventsCbList)
-                    cb.onDiscoveryCompleted(entryPoint);
-        }
-    }
-
-    public void onParsingStatsUpdated(int percent) {
-        synchronized (devicesDiscoveryCbList) {
-            if (!devicesDiscoveryCbList.isEmpty())
-                for (DevicesDiscoveryCb cb : devicesDiscoveryCbList)
-                    cb.onParsingStatsUpdated(percent);
-        }
-    }
-
-    @SuppressWarnings("unused")
-    public void onBackgroundTasksIdleChanged(boolean isIdle) {
-        mIsWorking = !isIdle;
-        LocalBroadcastManager.getInstance(sContext).sendBroadcast(new Intent(ACTION_IDLE).putExtra(STATE_IDLE, isIdle));
-        if (isIdle) {
-            synchronized (onMedialibraryReadyListeners) {
-                for (OnMedialibraryReadyListener listener : onMedialibraryReadyListeners) listener.onMedialibraryIdle();
-            }
-        }
-    }
-
-    @SuppressWarnings("unused")
-    void onReloadStarted(String entryPoint) {
-        synchronized (devicesDiscoveryCbList) {
-            if (!devicesDiscoveryCbList.isEmpty())
-                for (DevicesDiscoveryCb cb : devicesDiscoveryCbList)
-                    cb.onReloadStarted(entryPoint);
-        }
-    }
-
-    @SuppressWarnings("unused")
-    void onReloadCompleted(String entryPoint) {
-        synchronized (devicesDiscoveryCbList) {
-            if (!devicesDiscoveryCbList.isEmpty())
-                for (DevicesDiscoveryCb cb : devicesDiscoveryCbList)
-                    cb.onReloadCompleted(entryPoint);
-        }
-    }
-
-    @SuppressWarnings("unused")
-    void onEntryPointBanned(String entryPoint, boolean success) {
-        synchronized (entryPointsEventsCbList) {
-            if (!entryPointsEventsCbList.isEmpty())
-                for (EntryPointsEventsCb cb : entryPointsEventsCbList)
-                    cb.onEntryPointBanned(entryPoint, success);
-        }
-    }
-
-    @SuppressWarnings("unused")
-    void onEntryPointUnbanned(String entryPoint, boolean success) {
-        synchronized (entryPointsEventsCbList) {
-            if (!entryPointsEventsCbList.isEmpty())
-                for (EntryPointsEventsCb cb : entryPointsEventsCbList)
-                    cb.onEntryPointUnbanned(entryPoint, success);
-        }
-    }
-
-    @SuppressWarnings("unused")
-    void onEntryPointRemoved(String entryPoint, boolean success) {
-        synchronized (entryPointsEventsCbList) {
-            if (!entryPointsEventsCbList.isEmpty())
-                for (EntryPointsEventsCb cb : entryPointsEventsCbList)
-                    cb.onEntryPointRemoved(entryPoint, success);
-        }
-    }
-
-    public static LiveData<MediaWrapper> lastThumb = new LiveEvent<>();
-    @SuppressWarnings({"unused", "unchecked"})
-    void onMediaThumbnailReady(MediaWrapper media, boolean success) {
-        if (success) ((MutableLiveData)lastThumb).postValue(media);
-    }
-
-    public void setMediaUpdatedCb(MediaUpdatedCb mediaUpdatedCb, int flags) {
-        if (!mIsInitiated)
-            return;
-        this.mediaUpdatedCb = mediaUpdatedCb;
-        nativeSetMediaUpdatedCbFlag(flags);
-    }
-
-    public void removeMediaUpdatedCb() {
-        if (!mIsInitiated)
-            return;
-        setMediaUpdatedCb(null, 0);
-    }
-
-    public void setMediaAddedCb(MediaAddedCb mediaAddedCb, int flags) {
-        if (!mIsInitiated)
-            return;
-        this.mediaAddedCb = mediaAddedCb;
-        nativeSetMediaAddedCbFlag(flags);
-    }
-
-    public void setArtistsAddedCb(ArtistsAddedCb artistsAddedCb) {
-        if (!mIsInitiated) return;
-        this.mArtistsAddedCb = artistsAddedCb;
-    }
-
-    public void setArtistsModifiedCb(ArtistsModifiedCb artistsModifiedCb) {
-        if (!mIsInitiated)
-            return;
-        this.mArtistsModifiedCb = artistsModifiedCb;
-    }
-
-    public void setAlbumsAddedCb(AlbumsAddedCb AlbumsAddedCb) {
-        if (!mIsInitiated)
-            return;
-        this.mAlbumsAddedCb = AlbumsAddedCb;
-    }
-
-    public void setAlbumsModifiedCb(AlbumsModifiedCb AlbumsModifiedCb) {
-        if (!mIsInitiated)
-            return;
-        this.mAlbumsModifiedCb = AlbumsModifiedCb;
     }
 
     public SearchAggregate search(String query) {
         return mIsInitiated && !TextUtils.isEmpty(query) ? nativeSearch(query) : null;
     }
 
-    public MediaSearchAggregate searchMedia(String query) {
+    public AbstractMediaWrapper[] searchMedia(String query) {
         return mIsInitiated && !TextUtils.isEmpty(query) ? nativeSearchMedia(query) : null;
     }
 
-    public Artist[] searchArtist(String query) {
+    public AbstractMediaWrapper[] searchMedia(String query, int sort, boolean desc, int nbItems, int offset) {
+        return mIsInitiated && !TextUtils.isEmpty(query) ? nativeSearchPagedMedia(query, sort, desc, nbItems, offset) : null;
+    }
+
+    public int getMediaCount(String query) {
+        return mIsInitiated ? nativeGetSearchMediaCount(query) : 0;
+    }
+
+    public AbstractMediaWrapper[] searchAudio(String query, int sort, boolean desc, int nbItems, int offset) {
+        return mIsInitiated && !TextUtils.isEmpty(query) ? nativeSearchPagedAudio(query, sort, desc, nbItems, offset) : null;
+    }
+
+    public int getAudioCount(String query) {
+        return mIsInitiated ? nativeGetSearchAudioCount(query) : 0;
+    }
+
+    public AbstractMediaWrapper[] searchVideo(String query, int sort, boolean desc, int nbItems, int offset) {
+        return mIsInitiated && !TextUtils.isEmpty(query) ? nativeSearchPagedVideo(query, sort, desc, nbItems, offset) : null;
+    }
+
+    public int getVideoCount(String query) {
+        return mIsInitiated ? nativeGetSearchVideoCount(query) : 0;
+    }
+
+    public AbstractArtist[] searchArtist(String query) {
         return mIsInitiated && !TextUtils.isEmpty(query) ? nativeSearchArtist(query) : null;
     }
 
-    public Album[] searchAlbum(String query) {
+    public AbstractArtist[] searchArtist(String query, int sort, boolean desc, int nbItems, int offset) {
+        return mIsInitiated && !TextUtils.isEmpty(query) ? nativeSearchPagedArtist(query, sort, desc, nbItems, offset) : new AbstractArtist[0];
+    }
+
+    public AbstractAlbum[] searchAlbum(String query, int sort, boolean desc, int nbItems, int offset) {
+        return mIsInitiated && !TextUtils.isEmpty(query) ? nativeSearchPagedAlbum(query, sort, desc, nbItems, offset) : null;
+    }
+
+    public AbstractAlbum[] searchAlbum(String query) {
         return mIsInitiated && !TextUtils.isEmpty(query) ? nativeSearchAlbum(query) : null;
     }
 
-    public Genre[] searchGenre(String query) {
+    public AbstractGenre[] searchGenre(String query) {
         return mIsInitiated && !TextUtils.isEmpty(query) ? nativeSearchGenre(query) : null;
     }
 
-    public Playlist[] searchPlaylist(String query) {
+    public AbstractGenre[] searchGenre(String query, int sort, boolean desc, int nbItems, int offset) {
+        return mIsInitiated && !TextUtils.isEmpty(query) ? nativeSearchPagedGenre(query, sort, desc, nbItems, offset) : null;
+    }
+
+    public AbstractPlaylist[] searchPlaylist(String query) {
         return mIsInitiated && !TextUtils.isEmpty(query) ? nativeSearchPlaylist(query) : null;
     }
 
-    public void addDeviceDiscoveryCb(DevicesDiscoveryCb cb) {
-        synchronized (devicesDiscoveryCbList) {
-            if (!devicesDiscoveryCbList.contains(cb))
-                devicesDiscoveryCbList.add(cb);
-        }
+    public AbstractPlaylist[] searchPlaylist(String query, int sort, boolean desc, int nbItems, int offset) {
+        return mIsInitiated && !TextUtils.isEmpty(query) ? nativeSearchPagedPlaylist(query, sort, desc, nbItems, offset) : null;
     }
-
-    public void removeDeviceDiscoveryCb(DevicesDiscoveryCb cb) {
-        synchronized (devicesDiscoveryCbList) {
-            devicesDiscoveryCbList.remove(cb);
-        }
-    }
-
-    public void addOnMedialibraryReadyListener(OnMedialibraryReadyListener cb) {
-        synchronized (onMedialibraryReadyListeners) {
-            if (!onMedialibraryReadyListeners.contains(cb))
-                onMedialibraryReadyListeners.add(cb);
-        }
-    }
-
-    public void removeOnMedialibraryReadyListener(OnMedialibraryReadyListener cb) {
-        synchronized (onMedialibraryReadyListeners) {
-            onMedialibraryReadyListeners.remove(cb);
-        }
-    }
-
-    public void addEntryPointsEventsCb(EntryPointsEventsCb cb) {
-        synchronized (entryPointsEventsCbList) {
-            if (!entryPointsEventsCbList.contains(cb))
-                entryPointsEventsCbList.add(cb);
-        }
-    }
-
-    public void removeEntryPointsEventsCb(EntryPointsEventsCb cb) {
-        synchronized (entryPointsEventsCbList) {
-            entryPointsEventsCbList.remove(cb);
-        }
-    }
-
-    public void removeMediaAddedCb() {
-        if (!mIsInitiated)
-            return;
-        setMediaAddedCb(null, 0);
-    }
-
-    public static String[] getBlackList() {
-        return new String[] {
-                "/Android/data/",
-                "/Android/media/",
-                "/Alarms/",
-                "/Ringtones/",
-                "/Notifications/",
-                "/alarms/",
-                "/ringtones/",
-                "/notifications/",
-                "/audio/Alarms/",
-                "/audio/Ringtones/",
-                "/audio/Notifications/",
-                "/audio/alarms/",
-                "/audio/ringtones/",
-                "/audio/notifications/",
-                "/WhatsApp/Media/WhatsApp Animated Gifs/",
-        };
-    }
-
-    public static File[] getDefaultFolders() {
-        return new File[]{
-                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
-                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES),
-                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC),
-                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PODCASTS),
-                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM),
-        };
-    }
-
-    /* used only before API 13: substitute for NewWeakGlobalRef */
-    @SuppressWarnings("unused") /* Used from JNI */
-    private Object getWeakReference() {
-        return new WeakReference<>(this);
-    }
-
 
     // Native methods
     private native int nativeInit(String dbPath, String thumbsPath);
@@ -704,31 +489,45 @@ public class Medialibrary {
     private native void nativeDiscover(String path);
     private native void nativeRemoveEntryPoint(String path);
     private native String[] nativeEntryPoints();
-    private native boolean nativeRemoveDevice(String uuid);
-    private native MediaWrapper[] nativeLastMediaPlayed();
-    private native HistoryItem[] nativeLastStreamsPlayed();
+    private native boolean nativeRemoveDevice(String uuid, String path);
+    private native AbstractMediaWrapper[] nativeLastMediaPlayed();
+    private native AbstractMediaWrapper[] nativeLastStreamsPlayed();
     private native  boolean nativeAddToHistory(String mrl, String title);
     private native  boolean nativeClearHistory();
-    private native MediaWrapper nativeGetMedia(long id);
-    private native MediaWrapper nativeGetMediaFromMrl(String mrl);
-    private native MediaWrapper nativeAddMedia(String mrl);
-    private native MediaWrapper[] nativeGetVideos();
-    private native MediaWrapper[] nativeGetSortedVideos(int sort, boolean desc);
-    private native MediaWrapper[] nativeGetRecentVideos();
-    private native MediaWrapper[] nativeGetAudio();
-    private native MediaWrapper[] nativeGetSortedAudio(int sort, boolean desc);
-    private native MediaWrapper[] nativeGetRecentAudio();
+    private native AbstractMediaWrapper nativeGetMedia(long id);
+    private native AbstractMediaWrapper nativeGetMediaFromMrl(String mrl);
+    private native AbstractMediaWrapper nativeAddMedia(String mrl);
+    private native boolean nativeRemoveExternalMedia(long id);
+    private native AbstractMediaWrapper nativeAddStream(String mrl, String title);
+    private native AbstractMediaWrapper[] nativeGetVideos();
+    private native AbstractMediaWrapper[] nativeGetSortedVideos(int sort, boolean desc);
+    private native AbstractMediaWrapper[] nativeGetRecentVideos();
+    private native AbstractMediaWrapper[] nativeGetAudio();
+    private native AbstractMediaWrapper[] nativeGetSortedAudio(int sort, boolean desc);
+    private native AbstractMediaWrapper[] nativeGetSortedPagedAudio(int sort, boolean desc, int nbItems, int offset);
+    private native AbstractMediaWrapper[] nativeGetSortedPagedVideos(int sort, boolean desc, int nbItems, int offset);
+    private native AbstractMediaWrapper[] nativeGetRecentAudio();
     private native int nativeGetVideoCount();
     private native int nativeGetAudioCount();
-    private native Album[] nativeGetAlbums(int sort, boolean desc);
-    private native Album nativeGetAlbum(long albumtId);
-    private native Artist[] nativeGetArtists(boolean all, int sort, boolean desc);
-    private native Artist nativeGetArtist(long artistId);
-    private native Genre[] nativeGetGenres(int sort, boolean desc);
-    private native Genre nativeGetGenre(long genreId);
-    private native Playlist[] nativeGetPlaylists(int sort, boolean desc);
-    private native Playlist nativeGetPlaylist(long playlistId);
-    private native Playlist nativePlaylistCreate(String name);
+    private native AbstractAlbum[] nativeGetAlbums(int sort, boolean desc);
+    private native AbstractAlbum[] nativeGetPagedAlbums(int sort, boolean desc, int nbItems, int offset);
+    private native int nativeGetAlbumsCount();
+    private native AbstractAlbum nativeGetAlbum(long albumtId);
+    private native AbstractArtist[] nativeGetArtists(boolean all, int sort, boolean desc);
+    private native AbstractArtist[] nativeGetPagedArtists(boolean all, int sort, boolean desc, int nbItems, int offset);
+    private native int nativeGetArtistsCount(boolean all);
+    private native AbstractArtist nativeGetArtist(long artistId);
+    private native AbstractGenre[] nativeGetGenres(int sort, boolean desc);
+    private native AbstractGenre[] nativeGetPagedGenres(int sort, boolean desc, int nbItems, int offset);
+    private native int nativeGetGenresCount();
+    private native AbstractGenre nativeGetGenre(long genreId);
+    private native AbstractPlaylist[] nativeGetPlaylists(int sort, boolean desc);
+    private native AbstractPlaylist[] nativeGetPagedPlaylists(int sort, boolean desc, int nbItems, int offset);
+    private native int nativeGetPlaylistsCount();
+    private native AbstractPlaylist nativeGetPlaylist(long playlistId);
+    private native AbstractPlaylist nativePlaylistCreate(String name);
+    private native AbstractFolder[] nativeGetFolders(int type, int sort, boolean desc, int nbItems, int offset);
+    private native int nativeGetFoldersCount(int type);
     private native void nativePauseBackgroundOperations();
     private native void nativeResumeBackgroundOperations();
     private native void nativeReload();
@@ -739,36 +538,24 @@ public class Medialibrary {
     private native void nativeSetMediaUpdatedCbFlag(int flags);
     private native void nativeSetMediaAddedCbFlag(int flags);
     private native SearchAggregate nativeSearch(String query);
-    private native MediaSearchAggregate nativeSearchMedia(String query);
-    private native Artist[] nativeSearchArtist(String query);
-    private native Album[] nativeSearchAlbum(String query);
-    private native Genre[] nativeSearchGenre(String query);
-    private native Playlist[] nativeSearchPlaylist(String query);
+    private native AbstractMediaWrapper[] nativeSearchMedia(String query);
+    private native AbstractMediaWrapper[] nativeSearchPagedMedia(String query, int sort, boolean desc, int nbItems, int offset);
+    private native int nativeGetSearchMediaCount(String query);
+    private native AbstractMediaWrapper[] nativeSearchPagedAudio(String query, int sort, boolean desc, int nbItems, int offset);
+    private native int nativeGetSearchAudioCount(String query);
+    private native AbstractMediaWrapper[] nativeSearchPagedVideo(String query, int sort, boolean desc, int nbItems, int offset);
+    private native int nativeGetSearchVideoCount(String query);
+    private native AbstractArtist[] nativeSearchArtist(String query);
+    private native AbstractArtist[] nativeSearchPagedArtist(String query, int sort, boolean desc, int nbItems, int offset);
+    private native int nativeGetArtistsSearchCount(String query);
+    private native AbstractAlbum[] nativeSearchAlbum(String query);
+    private native AbstractAlbum[] nativeSearchPagedAlbum(String query, int sort, boolean desc, int nbItems, int offset);
+    private native int nativeGetAlbumSearchCount(String query);
+    private native AbstractGenre[] nativeSearchGenre(String query);
+    private native AbstractGenre[] nativeSearchPagedGenre(String query, int sort, boolean desc, int nbItems, int offset);
+    private native int nativeGetGenreSearchCount(String query);
+    private native AbstractPlaylist[] nativeSearchPlaylist(String query);
+    private native AbstractPlaylist[] nativeSearchPagedPlaylist(String query, int sort, boolean desc, int nbItems, int offset);
+    private native int nativeGetPlaylistSearchCount(String query);
     private native void nativeRequestThumbnail(long mediaId);
-
-    private boolean canReadStorage(Context context) {
-        return Build.VERSION.SDK_INT < Build.VERSION_CODES.M || ContextCompat.checkSelfPermission(context,
-                Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED;
-    }
-
-    public interface ArtistsAddedCb {
-        void onArtistsAdded();
-    }
-
-    public interface ArtistsModifiedCb {
-        void onArtistsModified();
-    }
-
-    public interface AlbumsAddedCb {
-        void onAlbumsAdded();
-    }
-
-    public interface AlbumsModifiedCb {
-        void onAlbumsModified();
-    }
-
-    public interface OnMedialibraryReadyListener {
-        void onMedialibraryReady();
-        void onMedialibraryIdle();
-    }
 }

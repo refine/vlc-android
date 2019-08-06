@@ -21,6 +21,8 @@
  *****************************************************************************/
 
 #include <pthread.h>
+#include <stdlib.h>
+#include <dlfcn.h>
 
 #include "libvlcjni-vlcobject.h"
 
@@ -45,6 +47,9 @@ static const libvlc_event_type_t mp_events[] = {
     libvlc_MediaPlayerSeekableChanged,
     libvlc_MediaPlayerPausableChanged,
     libvlc_MediaPlayerLengthChanged,
+#ifdef LIBVLC_MEDIA_PLAYER_HAS_RECORDING
+    libvlc_MediaPlayerRecordChanged,
+#endif
     -1,
 };
 
@@ -61,7 +66,8 @@ Equalizer_getInstance(JNIEnv *env, jobject thiz)
         (*env)->GetLongField(env, thiz,
                              fields.MediaPlayer.Equalizer.mInstanceID);
     if (!i_ptr)
-        throw_IllegalStateException(env, "can't get Equalizer instance");
+        throw_Exception(env, VLCJNI_EX_ILLEGAL_STATE,
+                        "can't get Equalizer instance");
     return (libvlc_equalizer_t*) i_ptr;
 }
 
@@ -106,6 +112,12 @@ MediaPlayer_event_cb(vlcjni_object *p_obj, const libvlc_event_t *p_ev,
         case libvlc_MediaPlayerLengthChanged:
             p_java_event->arg1 = p_ev->u.media_player_length_changed.new_length;
             break;
+#ifdef LIBVLC_MEDIA_PLAYER_HAS_RECORDING
+        case libvlc_MediaPlayerRecordChanged:
+            p_java_event->arg1 = p_ev->u.media_player_record_changed.recording;
+            p_java_event->argc1 = p_ev->u.media_player_record_changed.file_path;
+            break;
+#endif
     }
     p_java_event->type = p_ev->type;
     return true;
@@ -120,14 +132,17 @@ MediaPlayer_newCommon(JNIEnv *env, jobject thiz, vlcjni_object *p_obj,
     if (!p_obj->u.p_mp || !p_obj->p_sys)
     {
         VLCJniObject_release(env, thiz, p_obj);
-        throw_IllegalStateException(env, "can't create MediaPlayer instance");
+        throw_Exception(env,
+                        !p_obj->u.p_mp ? VLCJNI_EX_ILLEGAL_STATE : VLCJNI_EX_OUT_OF_MEMORY,
+                        "can't create MediaPlayer instance");
         return;
     }
     p_obj->p_sys->jwindow = (*env)->NewGlobalRef(env, jwindow);
     if (!p_obj->p_sys->jwindow)
     {
         VLCJniObject_release(env, thiz, p_obj);
-        throw_IllegalStateException(env, "can't create MediaPlayer instance");
+        throw_Exception(env, VLCJNI_EX_ILLEGAL_STATE,
+                             "can't create MediaPlayer instance");
         return;
     }
     libvlc_media_player_set_android_context(p_obj->u.p_mp, p_obj->p_sys->jwindow);
@@ -382,7 +397,11 @@ Java_org_videolan_libvlc_MediaPlayer_setTime(JNIEnv *env, jobject thiz,
     if (!p_obj)
         return;
 
+#if defined(LIBVLC_VERSION_MAJOR) && LIBVLC_VERSION_MAJOR < 4
     libvlc_media_player_set_time(p_obj->u.p_mp, time);
+#else
+    libvlc_media_player_set_time(p_obj->u.p_mp, time, false);
+#endif
 }
 
 jfloat
@@ -405,7 +424,12 @@ Java_org_videolan_libvlc_MediaPlayer_setPosition(JNIEnv *env, jobject thiz,
     if (!p_obj)
         return;
 
+#if defined(LIBVLC_VERSION_MAJOR) && LIBVLC_VERSION_MAJOR < 4
     libvlc_media_player_set_position(p_obj->u.p_mp, pos);
+#else
+    libvlc_media_player_set_position(p_obj->u.p_mp, pos, false);
+#endif
+
 }
 
 jlong
@@ -513,7 +537,7 @@ Java_org_videolan_libvlc_MediaPlayer_nativeSetAudioOutput(JNIEnv *env,
 
     if (!jaout || !(psz_aout = (*env)->GetStringUTFChars(env, jaout, 0)))
     {
-        throw_IllegalArgumentException(env, "aout invalid");
+        throw_Exception(env, VLCJNI_EX_ILLEGAL_ARGUMENT, "aout invalid");
         return false;
     }
 
@@ -537,7 +561,7 @@ Java_org_videolan_libvlc_MediaPlayer_nativeSetAudioOutputDevice(JNIEnv *env,
 
     if (!jid || !(psz_id = (*env)->GetStringUTFChars(env, jid, 0)))
     {
-        throw_IllegalArgumentException(env, "aout invalid");
+        throw_Exception(env, VLCJNI_EX_ILLEGAL_ARGUMENT, "aout invalid");
         return false;
     }
 
@@ -978,7 +1002,7 @@ Java_org_videolan_libvlc_MediaPlayer_nativeSetAspectRatio(JNIEnv *env,
     }
     if (!(psz_aspect = (*env)->GetStringUTFChars(env, jaspect, 0)))
     {
-        throw_IllegalArgumentException(env, "aspect invalid");
+        throw_Exception(env, VLCJNI_EX_ILLEGAL_ARGUMENT, "aspect invalid");
         return;
     }
 
@@ -1027,7 +1051,7 @@ Java_org_videolan_libvlc_MediaPlayer_nativeAddSlave(JNIEnv *env,
 
     if (!jmrl || !(psz_mrl = (*env)->GetStringUTFChars(env, jmrl, 0)))
     {
-        throw_IllegalArgumentException(env, "mrl invalid");
+        throw_Exception(env, VLCJNI_EX_ILLEGAL_ARGUMENT, "mrl invalid");
         return false;
     }
 
@@ -1058,6 +1082,44 @@ Java_org_videolan_libvlc_MediaPlayer_nativeSetEqualizer(JNIEnv *env,
     return libvlc_media_player_set_equalizer(p_obj->u.p_mp, p_eq) == 0 ? true: false;
 }
 
+jboolean
+Java_org_videolan_libvlc_MediaPlayer_nativeRecord(JNIEnv *env, jobject thiz,
+                                                  jstring jdirectory)
+{
+    vlcjni_object *p_obj = VLCJniObject_getInstance(env, thiz);
+    const char *psz_directory;
+
+    if (!p_obj)
+        return false;
+
+    int (*record_func)(libvlc_media_player_t *, const char *) =
+        dlsym(RTLD_DEFAULT, "libvlc_media_player_record");
+
+    if (!record_func)
+        return false;
+
+    if (jdirectory)
+    {
+        psz_directory = (*env)->GetStringUTFChars(env, jdirectory, 0);
+        if (!psz_directory)
+        {
+            throw_Exception(env, VLCJNI_EX_ILLEGAL_ARGUMENT, "directory invalid");
+            return false;
+        }
+    }
+    else
+        psz_directory = NULL;
+
+    jboolean ret = record_func(p_obj->u.p_mp, psz_directory) == 0;
+
+    if (psz_directory)
+    {
+        (*env)->ReleaseStringUTFChars(env, jdirectory, psz_directory);
+    }
+
+    return ret;
+}
+
 jint
 Java_org_videolan_libvlc_MediaPlayer_00024Equalizer_nativeGetPresetCount(JNIEnv *env,
                                                                          jobject thiz)
@@ -1074,7 +1136,7 @@ Java_org_videolan_libvlc_MediaPlayer_00024Equalizer_nativeGetPresetName(JNIEnv *
 
     if (index < 0)
     {
-        throw_IllegalArgumentException(env, "index invalid");
+        throw_Exception(env, VLCJNI_EX_ILLEGAL_ARGUMENT, "index invalid");
         return NULL;
     }
 
@@ -1097,7 +1159,7 @@ Java_org_videolan_libvlc_MediaPlayer_00024Equalizer_nativeGetBandFrequency(JNIEn
 {
     if (index < 0)
     {
-        throw_IllegalArgumentException(env, "index invalid");
+        throw_Exception(env, VLCJNI_EX_ILLEGAL_ARGUMENT, "index invalid");
         return 0.0;
     }
 
@@ -1110,7 +1172,7 @@ Java_org_videolan_libvlc_MediaPlayer_00024Equalizer_nativeNew(JNIEnv *env,
 {
     libvlc_equalizer_t *p_eq = libvlc_audio_equalizer_new();
     if (!p_eq)
-        throw_IllegalStateException(env, "can't create Equalizer instance");
+        throw_Exception(env, VLCJNI_EX_OUT_OF_MEMORY, "Equalizer");
 
     VLCJniObject_setInstance(env, thiz, p_eq);
 }
@@ -1122,7 +1184,7 @@ Java_org_videolan_libvlc_MediaPlayer_00024Equalizer_nativeNewFromPreset(JNIEnv *
 {
     libvlc_equalizer_t *p_eq = libvlc_audio_equalizer_new_from_preset(index);
     if (!p_eq)
-        throw_IllegalStateException(env, "can't create Equalizer instance");
+        throw_Exception(env, VLCJNI_EX_OUT_OF_MEMORY, "Equalizer");
 
     VLCJniObject_setInstance(env, thiz, p_eq);
 }
